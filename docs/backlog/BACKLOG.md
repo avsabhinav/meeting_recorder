@@ -68,8 +68,8 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 ### Epic P1 — Core Python (Phase 1)
 | id | Task | Status | Depends |
 |----|------|--------|---------|
-| P1.1 | Scaffold package (pyproject, ruff, pytest, `mr/`+`mr/core/` dirs, git init, LICENSE, README stub, config.toml.example) | in-progress | — |
-| P1.2 | `schema.py` dataclasses (Segment, Word, TranscriptionResult, CaptureMeta) | todo | P1.1 |
+| P1.1 | Scaffold package (pyproject, ruff, pytest, `mr/`+`mr/core/` dirs, git init, LICENSE, README stub, config.toml.example) | done | — |
+| P1.2 | `schema.py` dataclasses (Segment, Word, TranscriptionResult, CaptureMeta) | in-progress | P1.1 |
 | P1.3 | `output.py` .md + optional JSON writer (+ tests) | todo | P1.2 |
 | P1.4 | `merge.py` segment sort + echo dedup (+ tests w/ fixtures) | todo | P1.2 |
 | P1.5 | `transcribe.py` Transcriber + MlxWhisperTranscriber + ModelNotCachedError (+ tests w/ mock) | todo | P1.2, P1.1 |
