@@ -76,7 +76,7 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P1.6 | `capture.py` Python wrapper: spawn/signal `mr-capture`, read `meta.json` | todo | — |
 | P1.7 | `cli.py` with subcommand `process` (mic+system wav → .md) | todo | P1.3..P1.6 |
 | P1.8 | P1 integration: `mr process` on scripted WAV data | todo | P1.7 |
-| **PAUSE** | **Manual test: scripted conversation → capture (spike binary) → production transcribe+merge+output → attributed .md review** | **in-progress** | P1.1..P1.5 |
+| **PAUSE** | **Manual test: scripted conversation → capture (spike binary) → production transcribe+merge+output → attributed .md review** | **done** | P1.1..P1.5 |
 
 ### Epic P2 — Capture + control (Phase 2)
 | id | Task | Status | Depends |
@@ -90,10 +90,13 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P2.7 | End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed .md | todo | P2.4, P2.6 |
 
 ## Open / next
+- **Manual test PASSED** (2026-10-12): pipeline works end-to-end on real hardware. Result:
+  `docs/manual-test-result.md`. Speed ~15–63× realtime (a 45-min call ≈ 2–4 min to transcribe);
+  attribution + echo handling correct. Note: mic also captures room background audio → those
+  "You" lines; inherent to the 1:1 design. The "Courtney/Amanda" segments were a background show,
+  NOT a hallucination.
 - **Session handoff:** `docs/checkpoint.md` is the single resume guide. Briefs for P1.6 (`docs/tasks/P1_6_capture.md`)
   and P1.7 (`docs/tasks/P1_7_cli.md`) exist and are ready to dispatch.
-- **PAUSE step is the immediate next action:** user must run the scripted-conversation manual test
-  (see `docs/manual-test-conversation.md`) → capture + `examples/manual/driver.py spike/out/manual` →
-  report transcript/meta/permission observations. THEN continue P1.6.
+- **Next task: P1.6** `mr/core/capture.py` (RecordSession wrapper). Then P1.7 `mr/cli.py process`, P1.8 integration, then Epic P2.
 - After P2.7, hand simulated-conversation script + capture instructions to user;
   user validates capture on a real meeting tomorrow.
