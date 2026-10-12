@@ -47,28 +47,41 @@
 | P1.6 | `capture.py` — `RecordSession` context manager + `CaptureResult`; spawns/`os.kill`(SIGINT/SIGTERM)/waits on `mr-capture`, parses `meta.json` → `CaptureMeta`; env override `MR_CAPTURE_BIN`, default `spike/capture/.build/release/mr-capture` |
 | P1.7 | `cli.py` — typer `app` + `process --mic --system [--json] [--dedup-threshold] [--model] [--language] [--stamp] [--out-dir]`; `ModelNotCachedError`→exit 3; `[project.scripts] mr = "mr.cli:app"`; adds `@app.callback()` to force multi-command mode |
 | P1.8 | P1 integration: `mr process` end-to-end on scripted/real spike WAVs (offline) → attributed .md, dedup active |
+| P2.1 | `capture/` production Swift package (top-level, `com.local.mr-capture`, build.sh + install.sh); wrapper default → `capture/.build/release/mr-capture` |
+| P2.2 | `config.py` — `load_config()` reads `~/.config/mr/config.toml` (tomllib), defaults + validation |
+| P2.3 | `state.py` — pidfile `<out_root>/.state/recording.json`, atomic write, stale (`os.kill(pid,0)`) probe |
+| P2.4 | `cli.py` — `start`/`stop`/`toggle`/`status`/`doctor [--fetch-model]` wired to config+state+capture; `_spawn_capture` keeps the child alive across commands (not RecordSession) |
+| P2.5 | `notify_complete()` — fail-soft osascript macOS notification on stop/toggle |
+| P2.6 | Full README (CLI ref, config, hotkey, permissions, troubleshooting) + `docs/permissions-troubleshooting.md` |
+| P2.7 | `docs/simulated-test-production.md` (canonical `mr toggle` simulated test) + `examples/manual/README.md`; old driver deprecation noted |
 
-Git history (`main`): `b5c5033→…→ef0b6b5→920459a (PAUSE)→18bb7eb (P1.6)→7df890d (P1.7)`.
+Git history (`main`): `…920459a (PAUSE)→18bb7eb→7df890d→1e22195→bc229c9→daa22ae→1871fa9→a7f5119→dd085f9→409be11→8a49418`.
 
-## Phase 1 Core — DONE ✅
+## Phase 1 + Epic P2 — ALL ENGINEERING TASKS DONE ✅
 
-56 tests pass (`./spike/.venv/bin/python -m pytest tests/ -q`); `ruff check mr tests` clean.
-Real integration verified this session:
-`HF_HUB_OFFLINE=1 ./spike/.venv/bin/python -m mr.cli process --mic spike/out/manual/mic.wav --system spike/out/manual/system.wav --stamp p18 --out-dir /tmp/mr-p18`
-→ correctly attributed You/Them `.md`, ~13 kept segments (echo dedup active). CLI help works via `python -m mr.cli --help` / `process --help`.
+99 tests pass (`./spike/.venv/bin/python -m pytest tests/ -q`); `ruff check mr tests` clean;
+working tree clean at `8a49418`.
+Real end-to-end VERIFIED this session (P2.4): a real sparse capture via `_do_start` → ~4 s
+mic+system → `_do_stop` → offline mlx-whisper transcribe → merge → correct You/Them `.md`
+(`/tmp` scratch out_root). `mr doctor` on this Mac: macOS 27.0.1, helper
+`capture/.build/release/mr-capture`, model cached.
 
-## Next tasks (Epic P2 — sequential, ONE dev_task at a time)
+## Remaining — HUMAN user, real hardware (the actual live recording)
 
-Briefs not yet written — write each in `docs/tasks/` before dispatch:
-- **P2.1** Productionize `capture/` (top-level Swift pkg, build.sh, Info.plist, install) — drop real binary where `MR_CAPTURE_BIN`/default `spike/capture/.build/release/mr-capture` points, so P1.6 wrapper works unchanged.
-- **P2.2** `config.py` TOML config (outdir, model, language, dedup_threshold) from `~/.config/mr/config.toml`.
-- **P2.3** `state.py` pidfile + recording state under `~/Meetings/.state`.
-- **P2.4** `cli.py` start/stop/toggle/status/doctor (extends the existing typer `app`; uses `RecordSession` + config + state).
-- **P2.5** Completion notification (osascript) on stop→transcribe.
-- **P2.6** README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE.
-- **P2.7** End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed `.md`; then hand script+capture instructions to user for real-meeting validation.
+The live **simulated-conversation test** needs a person to speak + play audio —
+`docs/simulated-test-production.md` is the canonical guide. Steps: build assets
+(`examples/manual/prep_clips.sh`), `mr toggle --no-aec` (Terminal 1),
+`examples/manual/play_timed.sh` (Terminal 2) + speak the You lines, `mr toggle` (stop) →
+verify `~/Meetings/transcripts/<stamp>.md` attribution/echo/hallucination + the notification.
+Then `mr toggle` on a real 1:1 call validates the goal.
 
-Reminder on P1.6 wrapper for P2.4: `mr/core/capture.py` exposes `RecordSession(out_dir, *, aec=True, capture_bin=None)` as a context manager with `.returncode`/`.meta`/`.result()`, plus `assert_capture_bin()` and `CaptureResult`.
+## Working notes for any future session
+
+- Run CLI via `./spike/.venv/bin/python -m mr.cli <cmd>` (not the `mr` console script, which
+  isn't installed in this checkout). Config at `~/.config/mr/config.toml`.
+- P1.6 `mr/core/capture.py` exposes `RecordSession` + `assert_capture_bin()` + `CaptureResult`
+  (used by integration); P2.4 `start`/`toggle` spawn via `_spawn_capture` (Popen) so the child
+  outlives the short command.
 
 > **Dispatch discipline:** strictly ONE worker at a time; briefs in `docs/tasks/`; verify every result
 > yourself (`git diff --stat` + acceptance commands) before marking done; workers never commit — the
@@ -77,7 +90,7 @@ Reminder on P1.6 wrapper for P2.4: `mr/core/capture.py` exposes `RecordSession(o
 
 ## Goal
 
-Persisted goal (id `goal-a31ff0fb-2837-4ed0-9df8-ed94375a6af1`, rev 1, armed) with objective set
-to: continue the meeting-recorder project — implement P1.6/P1.7/P1.8 (Phase 1 Core) then Epic P2 so
-`mr toggle` records + transcribes + writes an attributed .md under `~/Meetings`. Phase 1 Core is done;
-resume with **P2.1**.
+Persisted goal (id `goal-a31ff0fb-2837-4ed0-9df8-ed94375a6af1`) armed. Objective: continue the
+meeting-recorder project — Phase 1 + Epic P2 so `mr toggle` records + transcribes + writes an
+attributed .md under `~/Meetings`. **ALL engineering tasks done**; only the human-run live
+simulated-conversation test remains (see above) to fully validate the goal.

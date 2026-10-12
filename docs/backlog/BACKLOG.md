@@ -89,19 +89,18 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | done | P2.4 |
 | P2.7 | End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed .md | in-progress | P2.4, P2.6 |
 
-## Open / next
-- **Manual test PASSED** (2026-10-12): pipeline works end-to-end on real hardware. Result:
-  `docs/manual-test-result.md`. Speed ~15–63× realtime (a 45-min call ≈ 2–4 min to transcribe);
-  attribution + echo handling correct. Note: mic also captures room background audio → those
-  "You" lines; inherent to the 1:1 design. The "Courtney/Amanda" segments were a background show,
-  NOT a hallucination.
-- **Phase 1 Core COMPLETE (this session):** P1.6 (`capture.py` RecordSession wrapper) and P1.7
-  (`cli.py` typer `process` subcommand) implemented, tested, committed. P1.8 integration verified:
-  `mr process --mic spike/out/manual/mic.wav --system spike/out/manual/system.wav` runs the real
-  offline mlx-whisper pipeline, merges with echo dedup ("kept 13 segments"), and writes a correctly
-  attributed You/Them `.md`. 56 tests pass; ruff clean. `[project.scripts] mr = "mr.cli:app"` added.
-  Commits: `18bb7eb` (P1.6), `7df890d` (P1.7).
-- **Session handoff:** `docs/checkpoint.md` is the single resume guide (update for the new commits).
-- **Next: Epic P2.** Start with P2.1 (productionize `capture/` Swift), then P2.2 `config.py`,
-  P2.3 `state.py`, P2.4 `cli.py start/stop/toggle/status/doctor`, P2.5 notification, P2.6 docs,
-  P2.7 end-to-end test.
+## Open / next — ALL ENGINEERING TASKS DONE ✅
+- **Manual test PASSED** (2026-10-12): pipeline works end-to-end on real hardware
+  (`docs/manual-test-result.md`). Attribution + echo handling correct; speed ~15–63× realtime.
+- **Phase 1 Core COMPLETE + Epic P2 COMPLETE (this session, HEAD `8a49418`):**
+  - P1.6 `capture.py` RecordSession; P1.7 `cli.py process`; P1.8 integration.
+  - P2.1 `capture/` Swift package (top-level, `com.local.mr-capture`); P2.2 `config.py`;
+    P2.3 `state.py` pidfile; P2.4 `cli start/stop/toggle/status/doctor`; P2.5 osascript notify;
+    P2.6 README + permissions/troubleshooting docs; P2.7 production simulated-conversation test doc.
+  - Real `mr toggle`-style capture → transcribe → attributed `.md` VERIFIED end-to-end (P2.4).
+  - **99 tests pass; ruff clean.** Working tree clean.
+- **Remaining (HUMAN user, real hardware):** run the live simulated-conversation test in
+  `docs/simulated-test-production.md` (play scripted Them audio via `play_timed.sh`, speak You
+  lines, `mr toggle` start/stop) → validate attribution/echo/hallucination + the `.md`. Then the
+  project (Phase 1 + Phase 2, `mr toggle` goal) is verifiably complete.
+- **Session handoff:** `docs/checkpoint.md` is the single resume guide (update for new commits).
