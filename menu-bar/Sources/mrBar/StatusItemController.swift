@@ -101,12 +101,35 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// transcription path.
     @objc func startRecording(_ sender: Any?) {
         do {
-            let (_, exit) = try MRCLI().start()
+            let (out, exit) = try MRCLI().start()
             if exit == 0 {
                 setLive(true)
+            } else {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "Could not start recording"
+                alert.informativeText = out.isEmpty ? "mr start failed." : "mr start reported: \(out)"
+                alert.runModal()
             }
         } catch {
-            // mr unavailable or timed out: state self-corrects on next open.
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            if let e = error as? MRCLIError {
+                switch e {
+                case .mrUnavailable:
+                    alert.messageText = "mr CLI not found"
+                    alert.informativeText =
+                        "Neither a 'mr' command on PATH nor the MR_PYTHON environment variable is " +
+                        "available to this app. Start the app with MR_PYTHON set, or install mr on PATH."
+                case .processTimeout:
+                    alert.messageText = "mr did not respond"
+                    alert.informativeText = "The mr CLI did not finish within the timeout."
+                }
+            } else {
+                alert.messageText = "mr CLI not found"
+                alert.informativeText = "The mr CLI could not be launched."
+            }
+            alert.runModal()
         }
         statusItem.button?.needsDisplay = true
     }
@@ -120,9 +143,38 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // Fresh MRCLI inside the closure: no shared-state races with the
             // main thread (invocation is re-resolved; that is fine).
-            _ = try? MRCLI().stop()
+            var failure: (title: String, detail: String)? = nil
+            do {
+                let (out, exit) = try MRCLI().stop()
+                if exit != 0 {
+                    failure = ("Could not stop recording",
+                               out.isEmpty ? "mr stop failed." : "mr stop reported: \(out)")
+                }
+            } catch {
+                if let e = error as? MRCLIError {
+                    switch e {
+                    case .mrUnavailable:
+                        failure = ("mr CLI not found",
+                                   "Neither a 'mr' command on PATH nor the MR_PYTHON environment " +
+                                   "variable is available to this app. Start the app with MR_PYTHON " +
+                                   "set, or install mr on PATH.")
+                    case .processTimeout:
+                        failure = ("mr did not respond",
+                                   "The mr CLI did not finish within the timeout.")
+                    }
+                } else {
+                    failure = ("mr CLI not found", "The mr CLI could not be launched.")
+                }
+            }
             guard let self else { return }
             DispatchQueue.main.async {
+                if let failure {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = failure.title
+                    alert.informativeText = failure.detail
+                    alert.runModal()
+                }
                 self.statusItem.button?.needsDisplay = true
             }
         }
