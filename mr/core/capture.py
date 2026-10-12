@@ -22,8 +22,11 @@ from pathlib import Path
 
 from mr.core.schema import CaptureMeta, from_capture_dict
 
-#: Default location of the spike-built binary (relative to the repo root).
-DEFAULT_CAPTURE_BIN = "capture/.build/release/mr-capture"
+#: Repo root (this file lives at <root>/mr/core/capture.py).
+_MR_ROOT = Path(__file__).resolve().parent.parent.parent
+
+#: Default location of the spike-built binary (absolute, anchored at the repo root).
+DEFAULT_CAPTURE_BIN = str(_MR_ROOT / "capture" / ".build" / "release" / "mr-capture")
 
 #: Env var override for the binary location (P2.1 will point this at the real build).
 BIN_ENV_VAR = "MR_CAPTURE_BIN"
