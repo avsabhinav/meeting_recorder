@@ -94,7 +94,7 @@ def read_transcribing_heartbeat(out_root: str) -> dict | None         # None if 
 | MB-SW3 | `StatusItemController.swift` + `MenuBuilder.swift` + `main.swift`: NSStatusItem idle/live icon, dropdown menu, lazy refresh on open | done | MB-SW2 |
 | MB-SW4 | `StorageLocation.swift` (NSOpenPanel → `mr config set out_root`), Open Transcripts/Recordings folders, Info.plist (LSUIElement + mic/audio usage), entitlements, `install.sh` | done | MB-SW3 |
 | MB-SW5 | Compile whole package (sandbox-safe build), headless smoke of pure logic, `docs` manual-test doc (mirror `docs/simulated-test-production.md`), README note | done | MB-SW4 |
-| MB-SW7 | **Fix:** an icon click must only open the dropdown, NOT start recording. macOS activates the first highlighted menu item on click-through → insert an inert (disabled) status header as the first row so the click can't hit `Start Recording` (`MenuBuilder.swift` only) | in-progress | MB-SW3 |
+| MB-SW7 | **Fix:** an icon click must only open the dropdown, NOT start recording. macOS activates the first highlighted menu item on click-through → insert an inert (disabled) status header as the first row so the click can't hit `Start Recording` (`MenuBuilder.swift` only) | done | MB-SW3 |
 
 ## Per-epic acceptance (commands the CTO agent runs to verify)
 
@@ -107,6 +107,7 @@ def read_transcribing_heartbeat(out_root: str) -> dict | None         # None if 
 
 ## Progress log
 
+- **(this session) MB-SW7 bug fix — DONE (commit 8df4368):** inert first menu row. `swift build -c release` clean; `swift test` 18/18 green; `.app` bundle regenerated via `install.sh`. User must relaunch the rebuilt app to confirm the icon click no longer starts a recording.
 - **(this session) MB-SW7 bug fix:** User report — "as soon as I click on the icon a meeting recording starts … it should just open the dropdown." Confirmed via user: the dropdown opens AND the click lands on the first auto-highlighted item, activating it. First item is `Start Recording` → single icon click starts recording. Fix: inert (disabled, non-actionable) status header becomes the topmost row so the click-through hits nothing. Brief `docs/tasks/MB-SW7_fix_first_item.md`.
 - **(this session) Started Epic MB (menu-bar app).** Backlog refreshed from `MB_1_menubar_app.md`; plan + decomposition below.
   - **Post-Epic MB-SW6 (d7e344b):** Start/Stop now show an error dialog on any `mr` CLI failure instead of silently closing the menu. Confirmed via user test that `mr start` itself works on the real Mac (creates `~/Meetings/recordings/<stamp>`, records from mic). The earlier `FileNotFoundError` on `~/Meetings` was an artifact of the CTO's DSH sandbox (blocks `~/Meetings` writes), NOT a real `mr` bug. Remaining real issue: verifying the GUI action context — the `.app` must be launched with `MR_PYTHON=/Users/abhinavademmagari/Documents/Projects/meeting recorder/spike/.venv/bin/python` (or `mr` on PATH) or the CLI lookup fails `.mrUnavailable`. **HUMAN step now:** relaunch the freshly built `menu-bar/.build/Release/mrBar.app` with `MR_PYTHON` set and Start Recording — the icon should turn red and (on any failure) an alert explains why.
