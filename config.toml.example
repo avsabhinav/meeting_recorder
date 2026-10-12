@@ -1,0 +1,17 @@
+# meeting-recorder sample configuration.
+# Copy to ~/.config/mr/config.toml and adjust to taste.
+
+# Root directory for recordings/ and transcripts/.
+out_root = "~/Meetings"
+
+# mlx-whisper model (Hugging Face repo id or local path).
+model = "mlx-community/whisper-large-v3-turbo"
+
+# Forced transcription language (ISO code); "en" default.
+language = "en"
+
+# Echo-dedup similarity threshold (0..1) when merging You/Them streams.
+dedup_threshold = 0.6
+
+# Keep the raw WAV files after transcription (true = re-processable).
+keep_audio = true

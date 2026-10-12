@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
+
+# Swift / capture
+capture/.build/
+spike/capture/.build/
+
+# throwaway spike artifacts (folded in from spike/.gitignore)
+spike/out/
+spike/.venv/
+
+# demo outputs
+examples/demo/output/
