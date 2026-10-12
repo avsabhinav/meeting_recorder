@@ -16,11 +16,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     let statusItem: NSStatusItem
     let menuBuilder: MenuBuilder
 
-    /// v1.1 base for the transcription heartbeat: the CLI does not yet expose
-    /// the current `out_root` when idle, so default to `~/Meetings`
-    /// (the `mr` default). The Transcribing section reflects that default root.
+    /// Base for the transcription heartbeat: the current resolved `out_root`
+    /// from `mr config get out_root` (MB-SW4), falling back to `~/Meetings`
+    /// (the `mr` default) when the CLI is unavailable or errors. Computed
+    /// (not stored) so every `refresh()` — i.e. every menu open — re-queries
+    /// the CLI, and a storage-location change is picked up on the next open.
     private var transcriptionBase: URL {
-        URL(fileURLWithPath: ("~/Meetings" as NSString).expandingTildeInPath)
+        if let root = StorageLocation.currentRoot() {
+            return URL(fileURLWithPath: root)
+        }
+        return URL(fileURLWithPath: ("~/Meetings" as NSString).expandingTildeInPath)
     }
 
     private var isLiveRecording = false
@@ -120,6 +125,106 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             DispatchQueue.main.async {
                 self.statusItem.button?.needsDisplay = true
             }
+        }
+    }
+
+    // MARK: - Storage location (MB-SW4)
+
+    /// "Change Storage Location…" → `NSOpenPanel` (directories only) →
+    /// `mr config set out_root <dir>`.
+    ///
+    /// A menu-bar app has no window to sheet the panel onto, so `begin`
+    /// (non-blocking) is used instead of `runModal` — the completion handler
+    /// runs on the main thread, which is where the `NSAlert` confirmation must
+    /// show.
+    @objc func changeStorageLocation(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.title = "Choose Storage Location"
+        panel.message = "New recordings & transcripts will go here. Existing files are NOT moved."
+        panel.prompt = "Choose"
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.changeRoot(url.path)
+        }
+    }
+
+    /// Applies the chosen root via `mr config set out_root` (the app never
+    /// writes config itself), then confirms or reports the CLI's error.
+    /// Always called on the main thread.
+    private func changeRoot(_ newRoot: String) {
+        let result: (out: String, exit: Int32)
+        do {
+            result = try MRCLI().setOutRoot(newRoot)
+        } catch {
+            // `mr` unavailable or the process timed out (not a bad path).
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Could not change storage location"
+            alert.informativeText = "The mr CLI is unavailable or did not respond."
+            alert.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        if result.exit == 0 {
+            alert.alertStyle = .informational
+            alert.messageText = "Storage location updated."
+            alert.informativeText =
+                "Recordings and transcripts for NEW sessions go to:\n\(result.out)\n" +
+                "Existing files were not moved."
+        } else {
+            alert.alertStyle = .warning
+            alert.messageText = "Could not set storage location"
+            alert.informativeText = result.out.isEmpty ? "mr config set out_root failed." : result.out
+        }
+        alert.runModal()
+
+        // Reflect the new root in the Transcribing section + folder-open paths.
+        refresh()
+    }
+
+    // MARK: - Folder open (MB-SW4)
+
+    /// "Open Folder ▸ Recordings" → open `<root>/recordings` in Finder.
+    @objc func openRecordingsFolder(_ sender: Any?) {
+        openSubfolder("recordings")
+    }
+
+    /// "Open Folder ▸ Transcripts" → open `<root>/transcripts` in Finder.
+    @objc func openTranscriptsFolder(_ sender: Any?) {
+        openSubfolder("transcripts")
+    }
+
+    /// Opens a subfolder of the current `out_root` (resolved via
+    /// `mr config get out_root`). If the subfolder does not exist yet but the
+    /// root does, open the root; if neither exists, tell the user the folder
+    /// is created on first use.
+    private func openSubfolder(_ sub: String) {
+        guard let root = StorageLocation.currentRoot() else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Cannot open folder"
+            alert.informativeText =
+                "The mr CLI is unavailable, so the current storage location is unknown."
+            alert.runModal()
+            return
+        }
+
+        let dir = root + "/" + sub
+        if FileManager.default.fileExists(atPath: dir) {
+            _ = NSWorkspace.shared.openFile(dir)
+        } else if FileManager.default.fileExists(atPath: root) {
+            // Subfolder not created yet (no sessions recorded at this root).
+            _ = NSWorkspace.shared.openFile(root)
+        } else {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "Folder does not exist yet"
+            alert.informativeText = "It is created on first use."
+            alert.runModal()
         }
     }
 

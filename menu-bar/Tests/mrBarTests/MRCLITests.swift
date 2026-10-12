@@ -45,6 +45,16 @@ final class MRCLITests: XCTestCase {
         XCTAssertEqual(call.args, ["config", "set", "out_root", "/tmp/x"])
     }
 
+    func testConfigGetOutRootBuildsConfigArgs() throws {
+        let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
+                          canned: ("/Users/u/Meetings", 0))
+        let (out, exit) = try cli.configGetOutRoot()
+        XCTAssertEqual(out, "/Users/u/Meetings")
+        XCTAssertEqual(exit, 0)
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertEqual(call.args, ["config", "get", "out_root"])
+    }
+
     func testStopReturnsCanned() throws {
         let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
                           canned: ("transcribed", 0))

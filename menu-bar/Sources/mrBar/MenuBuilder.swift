@@ -63,10 +63,48 @@ final class MenuBuilder {
             }
         }
 
-        // Placeholders only (MB-SW4 replaces these with a real NSOpenPanel +
-        // folder-open action). Disabled so the menu is whole but safe.
-        menu.addItem(disabledItem("Change Storage Location…"))
-        menu.addItem(disabledItem("Open Folder…"))
+        // Storage location + folder access (MB-SW4): real actions. Both need
+        // the CLI (the app never reads/writes config itself), so they are
+        // enabled only when `mr` resolves.
+        menu.addItem(.separator())
+
+        let changeRoot = NSMenuItem(
+            title: "Change Storage Location…",
+            action: #selector(StatusItemController.changeStorageLocation(_:)),
+            keyEquivalent: ""
+        )
+        changeRoot.target = target
+        changeRoot.isEnabled = isCLIAvailable
+        menu.addItem(changeRoot)
+
+        // "Open Folder" submenu with Recordings / Transcripts (chosen over two
+        // flat top-level items to keep the menu tidy; the brief only requires
+        // the capability).
+        let openFolder = NSMenuItem(title: "Open Folder", action: nil, keyEquivalent: "")
+        openFolder.isEnabled = isCLIAvailable
+        let openMenu = NSMenu(title: "Open Folder")
+        openMenu.autoenablesItems = false
+
+        let openRecordings = NSMenuItem(
+            title: "Recordings",
+            action: #selector(StatusItemController.openRecordingsFolder(_:)),
+            keyEquivalent: ""
+        )
+        openRecordings.target = target
+        openRecordings.isEnabled = isCLIAvailable
+        openMenu.addItem(openRecordings)
+
+        let openTranscripts = NSMenuItem(
+            title: "Transcripts",
+            action: #selector(StatusItemController.openTranscriptsFolder(_:)),
+            keyEquivalent: ""
+        )
+        openTranscripts.target = target
+        openTranscripts.isEnabled = isCLIAvailable
+        openMenu.addItem(openTranscripts)
+
+        openFolder.submenu = openMenu
+        menu.addItem(openFolder)
 
         menu.addItem(.separator())
 

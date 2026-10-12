@@ -60,6 +60,11 @@ struct MRCLI {
     func setOutRoot(_ dir: String) throws -> (out: String, exit: Int32) {
         try invoke(["config", "set", "out_root", dir])
     }
+    /// `mr config get out_root` — prints the resolved absolute root (bare path)
+    /// on exit 0. Non-zero exit is returned, not thrown (mirrors `setOutRoot`).
+    func configGetOutRoot() throws -> (out: String, exit: Int32) {
+        try invoke(["config", "get", "out_root"])
+    }
 
     private func invoke(_ args: [String]) throws -> (String, Int32) {
         guard let inv = invocation else { throw MRCLIError.mrUnavailable }
