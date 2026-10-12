@@ -31,7 +31,7 @@ from typing import Annotated
 
 import typer
 
-from mr.config import Config, load_config
+from mr.config import Config, load_config, set_out_root
 from mr.core.capture import assert_capture_bin
 from mr.core.merge import merge_transcripts
 from mr.core.output import (
@@ -216,6 +216,21 @@ def _do_stop(cfg: Config, json_sidecar: bool) -> None:
     notify_complete(state.stamp, md)  # fail-soft; never blocks or raises
 
 
+def _do_config_set(key: str, value: str) -> None:
+    """Apply ``config set <key> <value>`` (v1.1: only ``out_root``).
+
+    Raises :class:`typer.BadParameter` for an unsupported key or an invalid
+    value (typer reports it and exits 2).
+    """
+    if key != "out_root":
+        raise typer.BadParameter(f"unsupported config key: {key!r}")
+    try:
+        new_root = set_out_root(value)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+    typer.echo(f"out_root: {new_root}")
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -361,6 +376,19 @@ def doctor(
                 typer.echo(f"error: failed to fetch model {cfg.model}: {e}", err=True)
                 raise typer.Exit(code=1) from e
             typer.echo(f"fetched {cfg.model}")
+
+
+config_app = typer.Typer(help="Inspect or update mr configuration.")
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("set")
+def config_set(
+    key: Annotated[str, typer.Argument(help="Config key (v1.1: out_root)")],
+    value: Annotated[str, typer.Argument(help="New value")],
+) -> None:
+    """Set a config value (v1.1: ``mr config set out_root <dir>``)."""
+    _do_config_set(key, value)
 
 
 def main() -> None:
