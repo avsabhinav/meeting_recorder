@@ -88,9 +88,14 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P2.5 | Completion notification (osascript) on stop→transcribe | done | P2.4 |
 | P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | done | P2.4 |
 | P2.7 | Simulated-conversation test doc (`docs/simulated-test-production.md`) + examples/manual README | done | P2.4, P2.6 |
-| P2.8 | `examples/manual/verify_transcript.py` — automated PASS/FAIL check on transcript + meta.json (for the human test) | in-progress | P2.7 |
+| P2.8 | `examples/manual/verify_transcript.py` — automated PASS/FAIL check on transcript + meta.json (for the human test) | done | P2.7 |
 
 ## Open / next — ALL ENGINEERING TASKS DONE ✅
+- **LIVE simulated-conversation test PASSED** (2026-10-12): real mic+system capture →
+  transcribe → attributed `.md` via the production `mr toggle` flow end-to-end.
+  `verify_transcript.py` verdict **PASS**: 8 You + 6 Them segments, timestamps ordered,
+  only real-duplicated "thank you." flagged (not echo). Both speakers correctly attributed
+  by stream origin, incl. the overlapping line #3. Recording: `/tmp/mr-live/out`. ✅
 - **Manual test PASSED** (2026-10-12): pipeline works end-to-end on real hardware
   (`docs/manual-test-result.md`). Attribution + echo handling correct; speed ~15–63× realtime.
 - **Phase 1 Core COMPLETE + Epic P2 COMPLETE (this session, HEAD `8a49418`):**
@@ -104,4 +109,6 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
   `docs/simulated-test-production.md` (play scripted Them audio via `play_timed.sh`, speak You
   lines, `mr toggle` start/stop) → validate attribution/echo/hallucination + the `.md`. Then the
   project (Phase 1 + Phase 2, `mr toggle` goal) is verifiably complete.
+  - **✅ DONE (this session):** ran the live test → **PASS** (see above). Only remaining real-world
+    validation is a genuine multi-minute meeting recording (`~/Meetings`) for final confidence.
 - **Session handoff:** `docs/checkpoint.md` is the single resume guide (update for new commits).
