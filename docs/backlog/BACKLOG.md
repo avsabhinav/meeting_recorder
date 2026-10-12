@@ -90,5 +90,10 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P2.7 | End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed .md | todo | P2.4, P2.6 |
 
 ## Open / next
+- **Session handoff:** `docs/checkpoint.md` is the single resume guide. Briefs for P1.6 (`docs/tasks/P1_6_capture.md`)
+  and P1.7 (`docs/tasks/P1_7_cli.md`) exist and are ready to dispatch.
+- **PAUSE step is the immediate next action:** user must run the scripted-conversation manual test
+  (see `docs/manual-test-conversation.md`) → capture + `examples/manual/driver.py spike/out/manual` →
+  report transcript/meta/permission observations. THEN continue P1.6.
 - After P2.7, hand simulated-conversation script + capture instructions to user;
   user validates capture on a real meeting tomorrow.
