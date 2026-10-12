@@ -1,0 +1,241 @@
+"""Offline tests for ``mr.cli`` start/stop/toggle/status/doctor.
+
+Everything that would touch the real world (spawn, transcribe, HF cache,
+``os.kill``, state writes) is monkeypatched; no subprocess, no whisper, no
+network.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import signal
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+import mr.cli
+from mr.cli import app
+from mr.config import Config
+from mr.core.transcribe import ModelNotCachedError
+from mr.state import RecordingState
+
+runner = CliRunner()
+
+
+@pytest.fixture()
+def cfg(tmp_path, monkeypatch) -> Config:
+    """Config rooted at ``tmp_path``; ``load_config`` patched to return it."""
+    c = Config(
+        out_root=str(tmp_path),
+        model="org/model",
+        language="en",
+        dedup_threshold=0.6,
+        keep_audio=True,
+    )
+    monkeypatch.setattr(mr.cli, "load_config", lambda: c)
+    return c
+
+
+def test_start_happy(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli, "_spawn_capture", lambda out_dir, binary, aec: 5566)
+    monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
+    writes: list[tuple[int, str, str]] = []
+    monkeypatch.setattr(
+        mr.cli,
+        "write_state",
+        lambda out_root, pid, out_dir, stamp, started_at: writes.append((pid, out_dir, stamp)),
+    )
+    result = runner.invoke(app, ["start"])
+    assert result.exit_code == 0, result.output
+    m = re.search(r"recording started \(stamp (\S+)\)", result.output)
+    assert m is not None, result.output
+    stamp = m.group(1)
+    assert writes == [(5566, str(Path(cfg.out_root) / "recordings" / stamp), stamp)]
+    assert (Path(cfg.out_root) / "recordings" / stamp).is_dir()
+    assert "out_dir:" in result.output
+
+
+def test_start_already_recording(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli, "is_clear", lambda out_root: False)
+    spawned: list[object] = []
+    monkeypatch.setattr(mr.cli, "_spawn_capture", lambda *a: spawned.append(a))
+    result = runner.invoke(app, ["start"])
+    assert result.exit_code == 0, result.output
+    assert "already recording" in result.output
+    assert spawned == []
+
+
+def test_status_idle(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: None)
+    result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0, result.output
+    assert "recording: no" in result.output
+    assert "no transcript yet" in result.output
+
+
+def test_status_active(cfg, monkeypatch) -> None:
+    state = RecordingState(
+        1, 5566, "/tmp/x/recordings/s", "2026-01-01_0000", "2026-01-01T00:00:00Z"
+    )
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    tdir = Path(cfg.out_root) / "transcripts"
+    tdir.mkdir(parents=True)
+    (tdir / "2025-12-31_1200.md").write_text("# older\n", encoding="utf-8")
+    (tdir / "2026-01-01_0000.md").write_text("# newer\n", encoding="utf-8")
+    result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0, result.output
+    assert "recording: yes" in result.output
+    assert "5566" in result.output
+    assert "2026-01-01_0000" in result.output
+    assert "2026-01-01_0000.md" in result.output
+
+
+def test_status_active_but_transcripts_dir_empty(cfg, monkeypatch) -> None:
+    state = RecordingState(
+        1, 5566, "/tmp/x/recordings/s", "2026-01-01_0000", "2026-01-01T00:00:00Z"
+    )
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    # transcripts dir exists but holds no *.md files -> must not IndexError.
+    tdir = Path(cfg.out_root) / "transcripts"
+    tdir.mkdir(parents=True)
+    result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0, result.output
+    assert "recording: yes" in result.output
+    assert "no transcript yet" in result.output
+
+
+def test_stop_not_recording(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: None)
+    cleared: list[object] = []
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0, result.output
+    assert "not recording" in result.output
+    assert cleared == []
+
+
+def _make_active_state(cfg, tmp_path) -> RecordingState:
+    out_dir = Path(cfg.out_root) / "recordings" / "s1"
+    out_dir.mkdir(parents=True)
+    (out_dir / "mic.wav").write_bytes(b"stub")
+    (out_dir / "system.wav").write_bytes(b"stub")
+    (out_dir / "meta.json").write_text("{}", encoding="utf-8")
+    return RecordingState(1, os.getpid(), str(out_dir), "s1", "2026-01-01T00:00:00")
+
+
+def _fake_transcribe_and_write(cfg, tmp_path):
+    def _fake(cfg_: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False) -> Path:
+        p = Path(cfg_.out_root) / "transcripts" / f"{stamp}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"# Meeting — {stamp}\n", encoding="utf-8")
+        return p
+
+    return _fake
+
+
+def test_stop_happy(cfg, tmp_path, monkeypatch) -> None:
+    state = _make_active_state(cfg, tmp_path)
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    kills: list[tuple[int, int]] = []
+    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
+    cleared: list[str] = []
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0, result.output
+    assert (os.getpid(), signal.SIGINT) in kills
+    assert "wrote" in result.output and "transcripts/s1.md" in result.output
+    assert (Path(cfg.out_root) / "transcripts" / "s1.md").is_file()
+    assert cleared == [cfg.out_root]
+    # keep_audio=True in the fixture: WAVs are left in place
+    assert (Path(state.out_dir) / "mic.wav").exists()
+
+
+def test_stop_model_not_cached_keeps_state(cfg, tmp_path, monkeypatch) -> None:
+    state = _make_active_state(cfg, tmp_path)
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
+
+    def _boom(*args: object, **kwargs: object) -> Path:
+        raise ModelNotCachedError("model not cached")
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _boom)
+    cleared: list[str] = []
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 3
+    assert "not cached" in result.output
+    assert cleared == []  # state left in place for retry
+
+
+def test_toggle_idle_starts(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: None)
+    monkeypatch.setattr(mr.cli, "is_clear", lambda out_root: True)
+    spawned: list[tuple[str, str, bool]] = []
+    def _spawn(out_dir: str, binary: str, aec: bool) -> int:
+        spawned.append((out_dir, binary, aec))
+        return 5566
+
+    monkeypatch.setattr(mr.cli, "_spawn_capture", _spawn)
+    monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
+    monkeypatch.setattr(mr.cli, "write_state", lambda *a, **k: None)
+    result = runner.invoke(app, ["toggle"])
+    assert result.exit_code == 0, result.output
+    assert "recording started" in result.output
+    assert len(spawned) == 1
+    assert spawned[0][1] == "/x/mr-capture"
+    assert spawned[0][2] is True  # aec default
+
+
+def test_toggle_active_stops(cfg, tmp_path, monkeypatch) -> None:
+    state = _make_active_state(cfg, tmp_path)
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli, "is_clear", lambda out_root: False)
+    kills: list[tuple[int, int]] = []
+    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: kills.append((pid, sig)))
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
+    cleared: list[str] = []
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
+    result = runner.invoke(app, ["toggle"])
+    assert result.exit_code == 0, result.output
+    assert (os.getpid(), signal.SIGINT) in kills
+    assert "wrote" in result.output and "transcripts/s1.md" in result.output
+    assert cleared == [cfg.out_root]
+
+
+def test_doctor_offline(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli.platform, "mac_ver", lambda: ("14.2.0", "", ""))
+    monkeypatch.setattr(mr.cli, "_model_cached", lambda model: False)
+    monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.output
+    assert "14.2.0" in result.output
+    assert "/x/mr-capture" in result.output
+    assert "org/model" in result.output
+    assert "model cached: no" in result.output
+
+
+def test_doctor_fetch_model_not_cached(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli.platform, "mac_ver", lambda: ("14.2.0", "", ""))
+    monkeypatch.setattr(mr.cli, "_model_cached", lambda model: False)
+    monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
+    fetched: list[str] = []
+    monkeypatch.setattr(mr.cli, "_fetch_model", lambda model: fetched.append(model))
+    result = runner.invoke(app, ["doctor", "--fetch-model"])
+    assert result.exit_code == 0, result.output
+    assert "fetched org/model" in result.output
+    assert fetched == ["org/model"]
+
+
+def test_doctor_fetch_model_cached(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli.platform, "mac_ver", lambda: ("14.2.0", "", ""))
+    monkeypatch.setattr(mr.cli, "_model_cached", lambda model: True)
+    monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
+    fetched: list[str] = []
+    monkeypatch.setattr(mr.cli, "_fetch_model", lambda model: fetched.append(model))
+    result = runner.invoke(app, ["doctor", "--fetch-model"])
+    assert result.exit_code == 0, result.output
+    assert "already cached" in result.output
+    assert fetched == []  # no download attempted
