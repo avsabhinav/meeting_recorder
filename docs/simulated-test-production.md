@@ -112,7 +112,16 @@ macOS notification.
 
 1. `./spike/.venv/bin/python -m mr.cli status` → `recording: no` (no active capture
    after stop) and `last transcript: <path to the new .md>`.
-2. Open the transcript `~/Meetings/transcripts/<stamp>.md` and check:
+2. **Automated verdict** (recommended): run the verifier on the transcript + recording dir —
+   it checks both speakers, timestamp order, echo duplication, and that both tracks captured
+   audio, printing `OVERALL: PASS`/`FAIL`:
+   ```sh
+   ./spike/.venv/bin/python examples/manual/verify_transcript.py \
+     ~/Meetings/transcripts/<stamp>.md --recording ~/Meetings/recordings/<stamp>
+   ```
+   Exit 0 = PASS. Exit 1 = a hard check failed (missing side, out-of-order, silent track).
+3. Open the transcript `~/Meetings/transcripts/<stamp>.md` and check (visual review on top of
+   the automated verdict):
    - You and Them lines are **interleaved in time order** with `MM:SS` timestamps.
    - **Attribution is correct**: your spoken lines → **You**, the played Alex lines →
      **Them** (no swaps).

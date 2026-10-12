@@ -87,7 +87,8 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P2.4 | `cli.py` start/stop/toggle/status/doctor | done | P1.6, P2.1..P2.3 |
 | P2.5 | Completion notification (osascript) on stop→transcribe | done | P2.4 |
 | P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | done | P2.4 |
-| P2.7 | End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed .md | in-progress | P2.4, P2.6 |
+| P2.7 | Simulated-conversation test doc (`docs/simulated-test-production.md`) + examples/manual README | done | P2.4, P2.6 |
+| P2.8 | `examples/manual/verify_transcript.py` — automated PASS/FAIL check on transcript + meta.json (for the human test) | in-progress | P2.7 |
 
 ## Open / next — ALL ENGINEERING TASKS DONE ✅
 - **Manual test PASSED** (2026-10-12): pipeline works end-to-end on real hardware
