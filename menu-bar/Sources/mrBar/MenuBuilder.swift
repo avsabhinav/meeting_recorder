@@ -31,6 +31,11 @@ final class MenuBuilder {
     func rebuild(status: MRStatus, isCLIAvailable: Bool, transcribing: [TranscriptionState.Heartbeat]) {
         menu.removeAllItems()
 
+        // MB-SW7: inert first row. macOS highlights the first item when the
+        // menu opens, so it must not be an action — a disabled status header
+        // means an accidental click-through hits nothing.
+        menu.addItem(disabledItem(statusHeader(status)))
+
         let start = NSMenuItem(
             title: "Start Recording",
             action: #selector(StatusItemController.startRecording(_:)),
@@ -115,6 +120,11 @@ final class MenuBuilder {
         )
         quit.target = target
         menu.addItem(quit)
+    }
+
+    /// Plain-text status shown in the inert top row (MB-SW7).
+    private func statusHeader(_ status: MRStatus) -> String {
+        status.recording ? "(recording)" : "(idle)"
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {
