@@ -86,8 +86,8 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P2.3 | `state.py` pidfile + recording state | done | P1.1 |
 | P2.4 | `cli.py` start/stop/toggle/status/doctor | done | P1.6, P2.1..P2.3 |
 | P2.5 | Completion notification (osascript) on stop→transcribe | done | P2.4 |
-| P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | in-progress | P2.4 |
-| P2.7 | End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed .md | todo | P2.4, P2.6 |
+| P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | done | P2.4 |
+| P2.7 | End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed .md | in-progress | P2.4, P2.6 |
 
 ## Open / next
 - **Manual test PASSED** (2026-10-12): pipeline works end-to-end on real hardware. Result:

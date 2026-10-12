@@ -1,5 +1,7 @@
 # Manual Test — Scripted Conversation (pause checkpoint after Phase 1)
 
+> → Production CLI version: see `docs/simulated-test-production.md`.
+
 > **Why we stop here:** Phase 1 core is complete and unit-tested (schema, output, merge,
 > transcribe). Before building the live `mr start/stop/toggle` control layer (Phase 2),
 > we validate the whole real pipeline once: **spike `mr-capture`** (already-proven capture)
