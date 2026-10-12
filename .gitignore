@@ -15,6 +15,12 @@ build/
 capture/.build/
 spike/capture/.build/
 
+# Swift / menu-bar
+menu-bar/.build/
+menu-bar/.tmp/
+menu-bar/.modcache/
+menu-bar/.swiftpm-cache/
+
 # throwaway spike artifacts (folded in from spike/.gitignore)
 spike/out/
 spike/.venv/
