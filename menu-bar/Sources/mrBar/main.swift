@@ -16,8 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = StatusItemController()
     }
 
+    // A menu-bar-only app has no windows. Returning `true` here causes the
+    // app to QUIT whenever a status-item menu is dismissed by clicking outside.
+    // It must stay alive: only "Quit" (NSApp.terminate) should end it.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
     }
 }
 
