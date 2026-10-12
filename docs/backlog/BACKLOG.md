@@ -69,8 +69,8 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | id | Task | Status | Depends |
 |----|------|--------|---------|
 | P1.1 | Scaffold package (pyproject, ruff, pytest, `mr/`+`mr/core/` dirs, git init, LICENSE, README stub, config.toml.example) | done | — |
-| P1.2 | `schema.py` dataclasses (Segment, Word, TranscriptionResult, CaptureMeta) | in-progress | P1.1 |
-| P1.3 | `output.py` .md + optional JSON writer (+ tests) | todo | P1.2 |
+| P1.2 | `schema.py` dataclasses (Segment, Word, TranscriptionResult, CaptureMeta) | done | P1.1 |
+| P1.3 | `output.py` .md + optional JSON writer (+ tests) | in-progress | P1.2 |
 | P1.4 | `merge.py` segment sort + echo dedup (+ tests w/ fixtures) | todo | P1.2 |
 | P1.5 | `transcribe.py` Transcriber + MlxWhisperTranscriber + ModelNotCachedError (+ tests w/ mock) | todo | P1.2, P1.1 |
 | P1.6 | `capture.py` Python wrapper: spawn/signal `mr-capture`, read `meta.json` | todo | — |
