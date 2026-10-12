@@ -57,7 +57,10 @@ def write_transcribing_heartbeat(out_root: str, stamp: str, started_at: str) -> 
     """Record "transcribing session ``stamp``": mkdir ``.state`` + atomic write.
 
     Overwrites any existing heartbeat (a new transcription replaces the old
-    one). ``started_at`` is an ISO8601 timestamp (e.g. ``datetime.now().isoformat()``).
+    one). ``started_at`` is an ISO8601 timestamp — the caller should pass a
+    UTC-aware, ``Z``-suffixed value (e.g. ``datetime.now(UTC).isoformat()``
+    with ``+00:00``→``Z``) so the Swift ``ISO8601DateFormatter`` (which
+    requires a zone) can parse it.
     """
     path = heartbeat_path(out_root)
     path.parent.mkdir(parents=True, exist_ok=True)

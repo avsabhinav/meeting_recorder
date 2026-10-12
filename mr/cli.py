@@ -25,7 +25,7 @@ import platform
 import signal
 import subprocess
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -204,8 +204,10 @@ def _do_stop(cfg: Config, json_sidecar: bool) -> None:
 
     # Heartbeat: visible to the menu-bar app while transcribing; cleared in
     # ``finally`` so both success and the ModelNotCachedError path (exit 3)
-    # remove it.
-    write_transcribing_heartbeat(cfg.out_root, state.stamp, datetime.now().isoformat())
+    # remove it. The timestamp is UTC-aware with a trailing ``Z`` so the
+    # Swift ``ISO8601DateFormatter`` (which requires a zone) can parse it.
+    utc_now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    write_transcribing_heartbeat(cfg.out_root, state.stamp, utc_now)
     try:
         md = _transcribe_and_write(cfg, state.stamp, state.out_dir, json_sidecar=json_sidecar)
     except ModelNotCachedError as e:

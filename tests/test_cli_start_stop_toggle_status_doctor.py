@@ -347,6 +347,10 @@ def test_stop_writes_heartbeat_during_transcription(cfg, tmp_path, monkeypatch) 
     during = observed["during"]
     assert during is not None and during["stamp"] == state.stamp
     assert during["out_root"] == str(Path(cfg.out_root).resolve())
+    # The timestamp must be UTC-aware and Z-suffixed so Swift ISO8601DateFormatter
+    # (which requires a zone) can parse it.
+    assert during["started_at"].endswith("Z")
+    assert during["started_at"].startswith("20")
     # After stop completes, the heartbeat is cleared (file gone).
     assert read_transcribing_heartbeat(cfg.out_root) is None
     assert not heartbeat_path(cfg.out_root).exists()

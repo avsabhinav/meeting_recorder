@@ -1,0 +1,109 @@
+import Foundation
+
+/// Injectable seam for process spawning: all `MRCLI` subprocesses go through
+/// this, so tests can inject a fake runner that returns canned (stdout, exit)
+/// pairs without touching the real `mr` or the filesystem.
+struct ProcessRunner {
+    /// Runs `executable` with `args`, returning trimmed stdout + exit code.
+    /// A non-zero exit is NOT an error — it is returned, not thrown.
+    var run: (URL, [String]) throws -> (stdout: String, exit: Int32)
+
+    /// Real implementation via Foundation `Process`.
+    static let `default` = ProcessRunner(run: ProcessRunner.realRun)
+
+    /// Hard timeout: `mr stop` transcribes (can take 1–3 min), so this is
+    /// generous. On timeout the child is killed and an error is thrown.
+    static let timeoutSeconds: TimeInterval = 120
+
+    static func realRun(_ exe: URL, _ args: [String]) throws -> (String, Int32) {
+        let process = Process()
+        process.executableURL = exe
+        process.arguments = args
+        let stdoutPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        // readDataToEndOfFile returns once the child closes stdout (i.e. exits);
+        // guard against a hung child with a hard deadline.
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            throw MRCLIError.processTimeout
+        }
+        let out = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (out, process.terminationStatus)
+    }
+}
+
+/// Errors surfaced by the CLI layer (distinct from a non-zero `mr` exit, which
+/// is a normal returned value, not a throw).
+enum MRCLIError: Error, Equatable {
+    case mrUnavailable
+    case processTimeout
+}
+
+/// Typed wrapper over the `mr` CLI. Every method returns the raw stdout plus
+/// the exit code — the caller decides what the exit code means. Never raises
+/// on non-zero exit (e.g. `mr config set` exit 2 on a bad path is data).
+struct MRCLI {
+    var runner: ProcessRunner = .default
+    var invocation: MRInvocation? = AppInfo.resolveMrInvocation()
+
+    func status() throws -> (out: String, exit: Int32) { try invoke(["status"]) }
+    func start() throws -> (out: String, exit: Int32) { try invoke(["start"]) }
+    func stop() throws -> (out: String, exit: Int32) { try invoke(["stop"]) }
+    func setOutRoot(_ dir: String) throws -> (out: String, exit: Int32) {
+        try invoke(["config", "set", "out_root", dir])
+    }
+
+    private func invoke(_ args: [String]) throws -> (String, Int32) {
+        guard let inv = invocation else { throw MRCLIError.mrUnavailable }
+        let (exe, prefix): (URL, [String]) = switch inv {
+        case .executable(let p): (URL(fileURLWithPath: p), [])
+        case .python(let p): (URL(fileURLWithPath: p), ["-m", "mr.cli"])
+        }
+        return try runner.run(exe, prefix + args)
+    }
+}
+
+/// Parsed view of `mr status` stdout.
+struct MRStatus {
+    let recording: Bool
+    let pid: Int?
+    let stamp: String?
+    let startedAt: String?
+
+    /// Parse `mr status` output line-by-line. Tolerant: missing fields are nil,
+    /// unknown lines (e.g. `last transcript: …`) are ignored.
+    static func parse(_ stdout: String) -> MRStatus {
+        var recording = false
+        var pid: Int?
+        var stamp: String?
+        var startedAt: String?
+        for rawLine in stdout.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line == "recording: yes" {
+                recording = true
+            } else if let value = field(line, key: "pid") {
+                pid = Int(value)
+            } else if let value = field(line, key: "stamp") {
+                stamp = value
+            } else if let value = field(line, key: "started_at") {
+                startedAt = value
+            }
+        }
+        return MRStatus(recording: recording, pid: pid, stamp: stamp, startedAt: startedAt)
+    }
+
+    /// Value of a `key: value` line, or nil if the line doesn't match.
+    private static func field(_ line: String, key: String) -> String? {
+        guard line.hasPrefix(key + ":") else { return nil }
+        let value = line.dropFirst(key.count + 1).trimmingCharacters(in: .whitespaces)
+        return value.isEmpty ? nil : value
+    }
+}
