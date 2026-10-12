@@ -1,18 +1,28 @@
-import Foundation
+import AppKit
 
-// mrBar — stub entrypoint (MB-SW1 scaffold). Real menu/GUI comes in later tasks.
-// Prints the resolved `mr` CLI invocation and exits 2 (placeholder behavior).
+// mrBar — macOS menu-bar app entrypoint (MB-SW3).
+//
+// A pure shell around the `mr` CLI: an NSStatusItem + dropdown. No dock icon
+// (`.accessory` activation policy — the canonical menu-bar-app mode; a future
+// Info.plist may add LSUIElement as well), no windows.
 
-func describe(_ inv: MRInvocation) -> String {
-    switch inv {
-    case .executable(let p): return "executable: \(p)"
-    case .python(let p): return "python: \(p) -m mr.cli"
+/// Retains the status-item controller (a strong reference is required — the
+/// delegate is retained by `NSApplication`, so this keeps it alive for the app
+/// lifetime).
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var controller: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        controller = StatusItemController()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 }
 
-if let inv = AppInfo.resolveMrInvocation() {
-    print("mrBar: mr CLI resolved as \(describe(inv))")
-} else {
-    print("mrBar: mr CLI not found (no candidate resolved)")
-}
-exit(2)
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.accessory)
+app.run()
