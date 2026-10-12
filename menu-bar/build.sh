@@ -7,6 +7,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Prefer the full Xcode toolchain if it's installed, even when xcode-select
+# still points at CommandLineTools (needed so `swift test`/XCTest resolve and
+# the build matches the Xcode SDK). No-op when not overridden.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -x "/Applications/Xcode.app/Contents/Developer/usr/bin/swift" ]; then
+  export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+fi
+
 # Fallback for restrictive shells (e.g. the DSH tool sandbox, where writes to
 # ~/Library/org.swift.swiftpm and the system temp dir are denied): redirect the
 # Swift toolchain caches to workspace-local dirs. No-op in a normal terminal.

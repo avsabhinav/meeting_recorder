@@ -39,11 +39,13 @@ final class TranscriptionStateTests: XCTestCase {
 
     func testFreshHeartbeatWithTrailingZ() throws {
         // Current UTC time as `...Z` — ISO8601DateFormatter must parse it.
+        // (This is exactly the form the Python `_do_stop` now writes, e.g.
+        // `2026-10-12T20:47:16.936490Z`.)
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
-        let z = f.string(from: Date()).replacingOccurrences(of: "+00:00", with: "Z")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        let z = f.string(from: Date())
         XCTAssertTrue(z.hasSuffix("Z"))
         try writeHeartbeat(base: tmpDir, body: """
         {"version":1,"stamp":"s","out_root":"x","started_at":"\(z)"}
