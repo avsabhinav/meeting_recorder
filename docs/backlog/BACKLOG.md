@@ -93,7 +93,7 @@ def read_transcribing_heartbeat(out_root: str) -> dict | None         # None if 
 | MB-SW2 | `MRCLI.swift` Process wrappers (start/stop/status/config-set) + `TranscriptionState.swift` heartbeat reader (lazy, max-age sweep 300 s) | done | MB-SW1 |
 | MB-SW3 | `StatusItemController.swift` + `MenuBuilder.swift` + `main.swift`: NSStatusItem idle/live icon, dropdown menu, lazy refresh on open | done | MB-SW2 |
 | MB-SW4 | `StorageLocation.swift` (NSOpenPanel → `mr config set out_root`), Open Transcripts/Recordings folders, Info.plist (LSUIElement + mic/audio usage), entitlements, `install.sh` | done | MB-SW3 |
-| MB-SW5 | Compile whole package (sandbox-safe build), headless smoke of pure logic, `docs` manual-test doc (mirror `docs/simulated-test-production.md`), README note | in-progress | MB-SW4 |
+| MB-SW5 | Compile whole package (sandbox-safe build), headless smoke of pure logic, `docs` manual-test doc (mirror `docs/simulated-test-production.md`), README note | done | MB-SW4 |
 
 ## Per-epic acceptance (commands the CTO agent runs to verify)
 
@@ -107,6 +107,9 @@ def read_transcribing_heartbeat(out_root: str) -> dict | None         # None if 
 ## Progress log
 
 - **(this session)** Started Epic MB (menu-bar app). Backlog refreshed from `MB_1_menubar_app.md`; plan + decomposition below.
+  - **Epic MB COMPLETE — menu-bar app built.** Python: config set_out_root, `config set/get out_root`, heartbeat (UTC-Z). Swift `menu-bar/` `mrBar` app: NSStatusItem shell (lazy refresh, async stop), Transcribing section, storage location + folder open, Info.plist LSUIElement + install.sh `.app`. `docs/menu-bar-manual-test.md` + README section.
+  - **All green:** Python 135 tests + ruff; Swift 18/18 (`swift test` via Xcode toolchain); `install.sh` produces a codesigned `.app`.
+  - **Human step remains:** run `docs/menu-bar-manual-test.md` on a real Mac (GUI icon/icon-state, TCC attribution to the app, Transcribing section). The CTO agent verified compile/build/tests; GUI behaviour is human-verifiable only.
   - MB-PY1/2/3 done (config set_out_root, `mr config set out_root`, heartbeat). 133 Python tests pass, ruff clean.
   - MB-SW1 done (package scaffold + AppInfo). MB-SW2 done (MRCLI + TranscriptionState + XCTest target).
   - **`swift test` now GREEN (Xcode installed):** 17/17 tests pass via `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`. `build.sh` auto-selects the Xcode toolchain. One test bug fixed (TrailingZ fixture now emits a genuine UTC `Z`).
