@@ -240,6 +240,18 @@ def _do_config_set(key: str, value: str) -> None:
     typer.echo(f"out_root: {new_root}")
 
 
+def _do_config_get(key: str) -> None:
+    """Print ``config get <key>`` (v1.1: only ``out_root``).
+
+    Raises :class:`typer.BadParameter` for an unsupported key (typer reports
+    it and exits 2).
+    """
+    if key != "out_root":
+        raise typer.BadParameter(f"unsupported config key: {key!r}")
+    cfg = load_config()
+    typer.echo(cfg.out_root)
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -398,6 +410,14 @@ def config_set(
 ) -> None:
     """Set a config value (v1.1: ``mr config set out_root <dir>``)."""
     _do_config_set(key, value)
+
+
+@config_app.command("get")
+def config_get(
+    key: Annotated[str, typer.Argument(help="Config key (v1.1: out_root)")],
+) -> None:
+    """Print the current value of a config key (v1.1: out_root)."""
+    _do_config_get(key)
 
 
 def main() -> None:

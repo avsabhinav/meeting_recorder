@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 import mr.cli
 from mr.cli import app
+from mr.config import Config
 
 runner = CliRunner()
 
@@ -63,3 +64,38 @@ def test_config_help_mentions_set_out_root() -> None:
     result = runner.invoke(app, ["config", "--help"])
     assert result.exit_code == 0
     assert "set out_root" in result.output
+
+
+def _fake_load_config(tmp_path, monkeypatch) -> str:
+    """Monkeypatch ``mr.cli.load_config``; return the resolved out_root."""
+    resolved = str(tmp_path / "root")
+
+    def fake(*args: object, **kwargs: object) -> Config:
+        return Config(
+            out_root=resolved,
+            model="model",
+            language="en",
+            dedup_threshold=0.6,
+            keep_audio=True,
+        )
+
+    monkeypatch.setattr(mr.cli, "load_config", fake)
+    return resolved
+
+
+def test_config_get_out_root_happy(tmp_path, monkeypatch) -> None:
+    resolved = _fake_load_config(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["config", "get", "out_root"])
+    assert result.exit_code == 0, result.output
+    assert resolved in result.output
+
+
+def test_config_get_unsupported_key(monkeypatch) -> None:
+    def fake(*args: object, **kwargs: object) -> Config:
+        raise AssertionError("load_config should not be called for unsupported key")
+
+    monkeypatch.setattr(mr.cli, "load_config", fake)
+    result = runner.invoke(app, ["config", "get", "model"])
+    assert result.exit_code == 2
+    assert "model" in result.output
+    assert "unsupported config key" in result.output
