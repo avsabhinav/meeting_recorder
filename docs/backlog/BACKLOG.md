@@ -74,8 +74,8 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P1.4 | `merge.py` segment sort + echo dedup (+ tests w/ fixtures) | done | P1.2 |
 | P1.5 | `transcribe.py` Transcriber + MlxWhisperTranscriber + ModelNotCachedError (+ tests w/ mock) | done | P1.2, P1.1 |
 | P1.6 | `capture.py` Python wrapper: spawn/signal `mr-capture`, read `meta.json` | done | — |
-| P1.7 | `cli.py` with subcommand `process` (mic+system wav → .md) | in-progress | P1.3..P1.6 |
-| P1.8 | P1 integration: `mr process` on scripted WAV data | todo | P1.7 |
+| P1.7 | `cli.py` with subcommand `process` (mic+system wav → .md) | done | P1.3..P1.6 |
+| P1.8 | P1 integration: `mr process` on scripted WAV data | done | P1.7 |
 | **PAUSE** | **Manual test: scripted conversation → capture (spike binary) → production transcribe+merge+output → attributed .md review** | **done** | P1.1..P1.5 |
 
 ### Epic P2 — Capture + control (Phase 2)
@@ -95,8 +95,13 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
   attribution + echo handling correct. Note: mic also captures room background audio → those
   "You" lines; inherent to the 1:1 design. The "Courtney/Amanda" segments were a background show,
   NOT a hallucination.
-- **Session handoff:** `docs/checkpoint.md` is the single resume guide. Briefs for P1.6 (`docs/tasks/P1_6_capture.md`)
-  and P1.7 (`docs/tasks/P1_7_cli.md`) exist and are ready to dispatch.
-- **Next task: P1.6** `mr/core/capture.py` (RecordSession wrapper). Then P1.7 `mr/cli.py process`, P1.8 integration, then Epic P2.
-- After P2.7, hand simulated-conversation script + capture instructions to user;
-  user validates capture on a real meeting tomorrow.
+- **Phase 1 Core COMPLETE (this session):** P1.6 (`capture.py` RecordSession wrapper) and P1.7
+  (`cli.py` typer `process` subcommand) implemented, tested, committed. P1.8 integration verified:
+  `mr process --mic spike/out/manual/mic.wav --system spike/out/manual/system.wav` runs the real
+  offline mlx-whisper pipeline, merges with echo dedup ("kept 13 segments"), and writes a correctly
+  attributed You/Them `.md`. 56 tests pass; ruff clean. `[project.scripts] mr = "mr.cli:app"` added.
+  Commits: `18bb7eb` (P1.6), `7df890d` (P1.7).
+- **Session handoff:** `docs/checkpoint.md` is the single resume guide (update for the new commits).
+- **Next: Epic P2.** Start with P2.1 (productionize `capture/` Swift), then P2.2 `config.py`,
+  P2.3 `state.py`, P2.4 `cli.py start/stop/toggle/status/doctor`, P2.5 notification, P2.6 docs,
+  P2.7 end-to-end test.

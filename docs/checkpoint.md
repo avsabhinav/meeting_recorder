@@ -12,7 +12,7 @@
   has `mlx_whisper 0.4.3`, `soundfile`, `numpy`, `rapidfuzz`, `scipy`, `pytest 9`, `ruff 0.17`,
   and now `typer 0.27.3`). All unit/runtime checks use it.
 - Test / lint: `./spike/.venv/bin/python -m pytest tests/ -q` · `./spike/.venv/bin/ruff check mr tests`
-- 42 tests pass. Repo is a **git repo** on branch `main` (HEAD `ef0b6b5`).
+- 56 tests pass. Repo is a **git repo** on branch `main` (HEAD `7df890d`).
 - Swift helper binary (Phase 1): `spike/capture/.build/release/mr-capture` (works, prints usage, exit 2).
 - Model cached at `~/.cache/huggingface/hub/models--mlx-community--whisper-large-v3-turbo`
   (~1.61 GB) → offline transcription works now.
@@ -43,55 +43,41 @@
 | P1.4 | `merge.py` segment sort + echo dedup (rapidfuzz overlap) |
 | P1.5 | `transcribe.py` Transcriber + MlxWhisperTranscriber + ModelNotCachedError |
 | —   | Manual-test setup: `docs/manual-test-conversation.md`, `examples/manual/driver.py`, `spike/out/manual/them.m4a` (TTS ~22 s) |
+| **PAUSE** | Manual conversation test PASSED (`docs/manual-test-result.md`) — capture → transcribe → merge → attributed .md |
+| P1.6 | `capture.py` — `RecordSession` context manager + `CaptureResult`; spawns/`os.kill`(SIGINT/SIGTERM)/waits on `mr-capture`, parses `meta.json` → `CaptureMeta`; env override `MR_CAPTURE_BIN`, default `spike/capture/.build/release/mr-capture` |
+| P1.7 | `cli.py` — typer `app` + `process --mic --system [--json] [--dedup-threshold] [--model] [--language] [--stamp] [--out-dir]`; `ModelNotCachedError`→exit 3; `[project.scripts] mr = "mr.cli:app"`; adds `@app.callback()` to force multi-command mode |
+| P1.8 | P1 integration: `mr process` end-to-end on scripted/real spike WAVs (offline) → attributed .md, dedup active |
 
-Git history (`main`): `b5c5033→a01e44a→0e3abcb→91854be→4bbbe73→ef0b6b5`.
+Git history (`main`): `b5c5033→…→ef0b6b5→920459a (PAUSE)→18bb7eb (P1.6)→7df890d (P1.7)`.
 
-## ⏸ PAUSE — manual test the USER must run (NEXT)
+## Phase 1 Core — DONE ✅
 
-Everything below is waiting on the user to record + run the driver. Then dispatch P1.6 onward.
+56 tests pass (`./spike/.venv/bin/python -m pytest tests/ -q`); `ruff check mr tests` clean.
+Real integration verified this session:
+`HF_HUB_OFFLINE=1 ./spike/.venv/bin/python -m mr.cli process --mic spike/out/manual/mic.wav --system spike/out/manual/system.wav --stamp p18 --out-dir /tmp/mr-p18`
+→ correctly attributed You/Them `.md`, ~13 kept segments (echo dedup active). CLI help works via `python -m mr.cli --help` / `process --help`.
 
-From `docs/manual-test-conversation.md` (scripted Alex/design conversation):
-1. **Window 1:** `spike/capture/.build/release/mr-capture --out spike/out/manual \
-   --no-aec`** (⚠ on MacOS the `\` line-continuation inside a single command line is fine only in a shell;
-   in a GUI Terminal type it as one line: `spike/capture/.build/release/mr-capture --out spike/out/manual`).
-   — note: use the default AEC (omit `--no-aec`) unless you prefer raw mic; the script covers both.
-2. **Window 2:** play `spike/out/manual/them.m4a` (loop it) while you read the `You` lines in the pauses.
-3. **Stop** with Ctrl-C in window 1.
-4. **Run:** `./spike/.venv/bin/python examples/manual/driver.py spike/out/manual`
-5. Report back: `transcript.md` contents, `meta.json`, whether the mic-permission prompt appeared,
-   and whether AEC/echo-ducking behaved.
+## Next tasks (Epic P2 — sequential, ONE dev_task at a time)
 
-This surfaces the real TCC mic-permission behavior (unverified from a real Terminal/Shortcuts).
+Briefs not yet written — write each in `docs/tasks/` before dispatch:
+- **P2.1** Productionize `capture/` (top-level Swift pkg, build.sh, Info.plist, install) — drop real binary where `MR_CAPTURE_BIN`/default `spike/capture/.build/release/mr-capture` points, so P1.6 wrapper works unchanged.
+- **P2.2** `config.py` TOML config (outdir, model, language, dedup_threshold) from `~/.config/mr/config.toml`.
+- **P2.3** `state.py` pidfile + recording state under `~/Meetings/.state`.
+- **P2.4** `cli.py` start/stop/toggle/status/doctor (extends the existing typer `app`; uses `RecordSession` + config + state).
+- **P2.5** Completion notification (osascript) on stop→transcribe.
+- **P2.6** README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE.
+- **P2.7** End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed `.md`; then hand script+capture instructions to user for real-meeting validation.
 
-## Next tasks (sequential, ONE dev_task at a time)
-
-Briefs are ready in `docs/tasks/`:
-- **P1.6** `mr/core/capture.py` — `RecordSession` context manager spawning `mr-capture`
-  (env override `MR_CAPTURE_BIN`; default `spike/capture/.build/release/mr-capture`), forwards
-  SIGINT/SIGTERM, parses `meta.json` → `CaptureMeta`. (brief + tests ready)
-- **P1.7** `mr/cli.py` — `typer` app with `process --mic --system [--json] [--dedup-threshold]`
-  subcommand; edits `pyproject.toml` to add `[project.scripts] mr = "mr.cli:app"`. (brief + tests ready)
-- **P1.8** P1 integration: run `mr process` on scripted WAV data end-to-end.
-- **Epic P2** (capture + control): P2.1 productionize `capture/` Swift; P2.2 `config.py`;
-  P2.3 `state.py` pidfile; P2.4 `cli.py` start/stop/toggle/status/doctor; P2.5 notification;
-  P2.6 README+hotkey+permissions docs; P2.7 end-to-end simulated test.
+Reminder on P1.6 wrapper for P2.4: `mr/core/capture.py` exposes `RecordSession(out_dir, *, aec=True, capture_bin=None)` as a context manager with `.returncode`/`.meta`/`.result()`, plus `assert_capture_bin()` and `CaptureResult`.
 
 > **Dispatch discipline:** strictly ONE worker at a time; briefs in `docs/tasks/`; verify every result
 > yourself (`git diff --stat` + acceptance commands) before marking done; workers never commit — the
-> CT O-agent owns git. After 2 failed attempts → re-split; then escalate via `subagent`.
-
-## Immediate next action (this session only document — not yet executed)
-
-P1.6 worker was cancelled at dispatch; nothing from it was written. `BACKLOG.md` currently shows P1.6
-`in-progress` — **revert to `todo`** in a fresh session, since P1.6 is not started.
-
-Open git items at checkpoint:
-- `docs/tasks/P1_6_capture.md`, `docs/tasks/P1_7_cli.md` (new, untracked, ready)
-- `docs/backlog/BACKLOG.md` modified (mark P1.6 in-progress — revert to `todo` before commit)
+> CTO agent owns git. After 2 failed attempts → re-split; then escalate via `subagent`.
+> Tests/lint always via `./spike/.venv/bin/python`.
 
 ## Goal
 
-Persisted goal (id `goal-060369c5-874a-4881-a2ab-2ad26be9c6ab`, rev 2) is **paused/disarmed**.
-The user must resume it (or it re-arms when a "continue" request arrives in a new session).
-Objective: build Phase 1 Core + Phase 2 Capture/control so `mr toggle` records + transcribes +
-writes an attributed .md under `~/Meetings`.
+Persisted goal (id `goal-a31ff0fb-2837-4ed0-9df8-ed94375a6af1`, rev 1, armed) with objective set
+to: continue the meeting-recorder project — implement P1.6/P1.7/P1.8 (Phase 1 Core) then Epic P2 so
+`mr toggle` records + transcribes + writes an attributed .md under `~/Meetings`. Phase 1 Core is done;
+resume with **P2.1**.
