@@ -82,8 +82,8 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | id | Task | Status | Depends |
 |----|------|--------|---------|
 | P2.1 | Productionize `capture/` (top-level Swift pkg, build.sh, Info.plist, install) | done | — |
-| P2.2 | `config.py` TOML config (outdir, model, language, dedup_threshold) | in-progress | P1.1 |
-| P2.3 | `state.py` pidfile + recording state | todo | P1.1 |
+| P2.2 | `config.py` TOML config (outdir, model, language, dedup_threshold) | done | P1.1 |
+| P2.3 | `state.py` pidfile + recording state | in-progress | P1.1 |
 | P2.4 | `cli.py` start/stop/toggle/status/doctor | todo | P1.6, P2.1..P2.3 |
 | P2.5 | Completion notification (osascript) on stop→transcribe | todo | P2.4 |
 | P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | todo | P2.4 |
