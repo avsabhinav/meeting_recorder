@@ -199,6 +199,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         panel.prompt = "Choose"
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
+            panel.orderOut(nil)
             self?.changeRoot(url.path)
         }
     }
@@ -233,9 +234,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             alert.informativeText = result.out.isEmpty ? "mr config set out_root failed." : result.out
         }
         alert.runModal()
-
-        // Reflect the new root in the Transcribing section + folder-open paths.
-        refresh()
     }
 
     // MARK: - Folder open (MB-SW4)
