@@ -20,6 +20,7 @@ import mr.cli
 from mr.cli import app, notify_complete
 from mr.config import Config
 from mr.core.transcribe import ModelNotCachedError
+from mr.heartbeat import heartbeat_path, read_transcribing_heartbeat
 from mr.state import RecordingState
 
 runner = CliRunner()
@@ -315,6 +316,71 @@ def test_stop_does_not_notify_on_model_not_cached(cfg, tmp_path, monkeypatch) ->
     result = runner.invoke(app, ["stop"])
     assert result.exit_code == 3
     assert notified == []
+
+
+# ---------------------------------------------------------------------------
+# MB-PY3: transcription heartbeat — written before transcription, cleared
+# (via finally) on success AND on the model-not-cached path. Real mr.heartbeat
+# file I/O against ``cfg.out_root`` (tmp_path).
+# ---------------------------------------------------------------------------
+
+
+def test_stop_writes_heartbeat_during_transcription(cfg, tmp_path, monkeypatch) -> None:
+    state = _make_active_state(cfg, tmp_path)
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
+    observed: dict[str, object] = {}
+
+    def _fake(cfg_: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False) -> Path:
+        # While transcribing, the heartbeat for this stamp must be present.
+        observed["during"] = read_transcribing_heartbeat(cfg_.out_root)
+        p = Path(cfg_.out_root) / "transcripts" / f"{stamp}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"# Meeting — {stamp}\n", encoding="utf-8")
+        return p
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake)
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: None)
+    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: True)
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0, result.output
+    during = observed["during"]
+    assert during is not None and during["stamp"] == state.stamp
+    assert during["out_root"] == str(Path(cfg.out_root).resolve())
+    # After stop completes, the heartbeat is cleared (file gone).
+    assert read_transcribing_heartbeat(cfg.out_root) is None
+    assert not heartbeat_path(cfg.out_root).exists()
+
+
+def test_stop_clears_heartbeat_on_model_not_cached(cfg, tmp_path, monkeypatch) -> None:
+    state = _make_active_state(cfg, tmp_path)
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
+
+    def _boom(*args: object, **kwargs: object) -> Path:
+        raise ModelNotCachedError("model not cached")
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _boom)
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: None)
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 3
+    assert "not cached" in result.output
+    # finally must have cleared the heartbeat even on the error path.
+    assert read_transcribing_heartbeat(cfg.out_root) is None
+    assert not heartbeat_path(cfg.out_root).exists()
+
+
+def test_stop_not_recording_writes_no_heartbeat(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: None)
+    writes: list[object] = []
+    monkeypatch.setattr(
+        mr.cli, "write_transcribing_heartbeat", lambda *a, **k: writes.append((a, k))
+    )
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0, result.output
+    assert "not recording" in result.output
+    assert writes == []
+    assert read_transcribing_heartbeat(cfg.out_root) is None
 
 
 def test_doctor_offline(cfg, monkeypatch) -> None:

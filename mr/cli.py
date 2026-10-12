@@ -41,6 +41,7 @@ from mr.core.output import (
     write_transcript,
 )
 from mr.core.transcribe import DEFAULT_MODEL, ModelNotCachedError, transcribe_audio
+from mr.heartbeat import clear_transcribing_heartbeat, write_transcribing_heartbeat
 from mr.state import clear_state, is_clear, is_stale, new_stamp, read_state, write_state
 
 app = typer.Typer(help="Local-first meeting recorder: capture and transcribe 1:1 calls.")
@@ -201,11 +202,17 @@ def _do_stop(cfg: Config, json_sidecar: bool) -> None:
         ):
             time.sleep(0.25)
 
+    # Heartbeat: visible to the menu-bar app while transcribing; cleared in
+    # ``finally`` so both success and the ModelNotCachedError path (exit 3)
+    # remove it.
+    write_transcribing_heartbeat(cfg.out_root, state.stamp, datetime.now().isoformat())
     try:
         md = _transcribe_and_write(cfg, state.stamp, state.out_dir, json_sidecar=json_sidecar)
     except ModelNotCachedError as e:
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(code=3) from e
+    finally:
+        clear_transcribing_heartbeat(cfg.out_root, state.stamp)
 
     if not cfg.keep_audio:
         for name in ("mic.wav", "system.wav"):
