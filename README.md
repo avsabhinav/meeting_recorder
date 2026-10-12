@@ -216,6 +216,24 @@ Add a Script Command with:
 - Input: none (stdout = output)
 - Then assign a hotkey (e.g. **⌥⌘R**) to the command.
 
+## Menu-bar app (beta)
+
+`mrBar` is an optional menu-bar app (no Dock icon — `LSUIElement`) that drives the
+same `mr` CLI: **Start Recording**, **Stop Recording & Transcribe** (with a live
+**Transcribing:** list), **Change Storage Location…**, **Open Folder ▸ Recordings /
+Transcripts**, and **Quit**. It is a pure shell around `mr` — it never spawns
+`mr-capture` or writes config/state itself, and it only refreshes when you open the
+menu (no polling).
+
+- **Build + install:** `cd menu-bar && ./install.sh` →
+  `menu-bar/.build/Release/mrBar.app` (drag into `/Applications` or launch in place).
+- **Make `mr` reachable:** either put it on `PATH` (`pip install -e .`), or launch the
+  app with `MR_PYTHON=<venv>/bin/python` set (the app resolves `mr` from `PATH` first,
+  then `MR_PYTHON`).
+- **Manual test + permissions:** see
+  [docs/menu-bar-manual-test.md](docs/menu-bar-manual-test.md) — the app is the
+  responsible process for the Microphone / System Audio TCC prompts.
+
 ## Permissions
 
 `mr-capture` needs **two** permissions, both granted the first time a capture

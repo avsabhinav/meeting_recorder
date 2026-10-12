@@ -1,4 +1,4 @@
-# MR Backlog — Production Build (Phase 1 → Phase 2)
+# MR Backlog — Production Build (Phase 1 → Phase 2 → MB Epic: menu-bar app)
 
 > Single source of truth for the production `mr` build. Lead (CTO agent) maintains
 > this file and the mirrored `todo_write`. Statuses: `todo → in-progress → review →
@@ -8,107 +8,117 @@
 
 ## Context / state
 
-- Phase 0 spike **GO** (`spike/SPIKE_RESULTS.md`): capture (system process tap via
-  aggregate+IOProc, mic via AVAudioEngine+VPIO AEC), mlx-whisper local GPU
-  (`large-v3-turbo`), echo handling (AEC on is primary; rapidfuzz token-ratio text
-  dedup is the always-on safety net), alignment ~1.4 ms, speed ~7× realtime,
-  no hallucinations with locked settings.
-- Locked settings (from spike): `language=en, word_timestamps=True,
-  condition_on_previous_text=False, no_speech_threshold=0.6,
-  hallucination_silence_threshold=0.0`; model `mlx-community/whisper-large-v3-turbo`;
-  offline cache-only via standard HF hub cache (`HF_HUB_OFFLINE=1`).
-- **Spike item #9 (real 45-min call) substituted** by user decision: validate with a
-  short **simulated conversation** (play scripted system audio; user replies with a
-  provided script) instead of a 45-min call. Real-meeting validation tomorrow.
-- Repo is NOT yet a git repo. Plan doc: `PLAN.md`. Spike: `spike/`.
+- Phase 0 spike **GO**; Phase 1 Core **DONE**; Epic P2 (capture + control) **DONE**.
+- Live simulated-conversation test **PASSED** (2026-10-12): production `mr toggle`
+  → real capture → transcribe → attributed `.md` end-to-end. 106 tests pass; ruff clean.
+- **This session: Epic MB** — a macOS menu-bar app ("mrBar") that starts/stops
+  recording and shows in-progress transcriptions, per `docs/tasks/MB_1_menubar_app.md`
+  (the user-authored feature brief; guiding contract locked in `PLAN.md` §3).
+
+## Environment facts (re-confirmed this session)
+
+- Working dir (HAS A SPACE): `/Users/abhinavademmagari/Documents/Projects/meeting recorder`
+- Python for all checks: `./spike/.venv/bin/python` (3.12.13).
+  - Tests: `./spike/.venv/bin/python -m pytest tests/ -q`  ·  Lint: `./spike/.venv/bin/ruff check mr tests`
+- **`mr` is NOT on `PATH` in this checkout** and `spike/.venv/bin` has no `mr` console
+  script. The CLI is invoked as `./spike/.venv/bin/python -m mr.cli <cmd>`. The menu-bar
+  app's Process wrapper MUST therefore resolve `mr` robustly: try `shutil.which("mr")`
+  first, then a fallback (env hint + configurable). Swift side sequences candidates in order.
+- Swift 6.4 / macOS SDK 27 toolchain present. `swift build` inside the DSH sandbox needs
+  workspace-local caches: `TMPDIR`, `CLANG_MODULE_CACHE_PATH` and `--disable-sandbox`
+  (the `capture/build.sh` pattern). Verified `import AppKit` compiles with those settings.
+- System = macOS 27.0.1 (menu bar + system-audio TCC apply).
 
 ## Paths / naming
 
-- Production package at repo root (working dir = `meeting recorder/`).
-- `mr/` Python package (cli, config, state, core/), `capture/` Swift package,
-  `tests/`, `examples/`, `docs/`, `pyproject.toml`, `LICENSE`, `README.md`.
-- Output: `~/Meetings/recordings/<stamp>/` (wavs+meta) + `~/Meetings/transcripts/<stamp>.md`.
-- State: `~/Meetings/.state/`. Config: `~/.config/mr/config.toml`.
+- `menu-bar/` — new SwiftPM package (sibling to `capture/`): executable target `mrBar`.
+- Python: `mr/config.py` (add `set_out_root`), `mr/cli.py` (add `config set out_root`).
+- Heartbeat: `<out_root>/.state/transcribing.json` (written by `_do_stop`, cleared on done;
+  read by the menu bar only when the dropdown opens). Max age for stale-sweep = 300 s.
+- Config: `~/.config/mr/config.toml`. State: `<out_root>/.state/recording.json`.
 
 ## Shared contracts (LOCKED — dependents assume these)
 
-**Segment block** (both transcribe & merge use this):
+**`out_root` config** — `mr.config`:
 ```python
-@dataclass Segment: text: str; start: float; end: float; speaker: str  # "You"|"Them"
+def set_out_root(path: str, *, config_path: str | Path | None = None) -> str:
+    """Validate+absolutize `path`, atomically rewrite out_root in the TOML,
+    PRESERVING all other keys/values/types, and return the resolved string.
+    Rewrites the value as a TOML string. If the config file doesn't exist,
+    create it with the user's other defaults plus out_root. Raises ValueError
+    on an empty/non-str path."""
 ```
-Word-level detail: `Segment.words: list[Word]` optional (`word,start,end,probability`).
+- Must not disturb unknown keys, comments are not required to be preserved (TOML rewrite
+  is fine as long as every existing key keeps its value; default to rebuilding the table).
+- CLI: `mr config set out_root <dir>` (typer command under a `config` group).
+  Prints the new resolved `out_root`; exit 0 on success, typer.BadParameter/exit 2 on a
+  bad path.
 
-**Transcriber** (`mr/core/transcribe.py`):
+**Heartbeat** (`transcribing.json`) — `mr/cli.py` (+ a tiny reader, see task):
 ```python
-def transcribe_audio(path: str, *, speaker: str, model: str, language: str) -> TranscriptionResult
-class TranscriptionResult: track, speaker, model, audio_seconds, wall_seconds, settings, segments: list[Segment]
+# written at the START of transcription inside _do_stop, removed on completion/failure-clear
+# shape: {"version":1, "stamp":"<stamp>", "out_root":"<abs>", "started_at":"<ISO8601>"}
+# path: <out_root>/.state/transcribing.json
+def _heartbeat_path(out_root: str) -> Path ...            # <out_root>/.state/transcribing.json
+def write_transcribing_heartbeat(out_root: str, stamp: str, started_at: str) -> None  # atomic
+def clear_transcribing_heartbeat(out_root: str, stamp: str) -> None    # remove file when it's ours
+def read_transcribing_heartbeat(out_root: str) -> dict | None         # None if missing/malformed/version!=1
 ```
-Raises `ModelNotCachedError` if model absent and offline.
+- `_do_stop`, around `_transcribe_and_write`, writes a heartbeat before transcribing and
+  clears it after (in a `finally`, and on `ModelNotCachedError` too). Keep the atomic-write
+  correctness bar (same as `mr.state._atomic_write`; reuse or duplicate a local helper).
 
-**merge** (`mr/core/merge.py`):
-```python
-def merge_transcripts(you: list[Segment], them: list[Segment], *, dedup_threshold: float=0.6) -> list[Segment]
-```
-Sorted by start (tie: Them before You, then by text). Echo dedup: drop a `you` segment
-when it time-overlaps a `them` segment and rapidfuzz token_ratio ≥ threshold*100.
-
-**Capture meta** (`meta.json` from `mr-capture`): keys
-`macos_version,aec,started_at,duration_seconds,mic:{device_name,native_sample_rate,
-native_channels,first_sample_seconds,samples_written},system:{...}`.
-
-**Swift contract:** `mr-capture --out <dir> [--no-aec]` → runs until SIGINT/SIGTERM,
-writes `mic.wav`, `system.wav` (16 kHz mono s16le, incremental) + `meta.json`, exit 0.
-
-**Transcript .md format** (`mr/core/output.py`): header `# Meeting — <stamp>`,
-`- Duration`, `- Participants: You (mic), Them (system)`, `- Source`, `## Transcript`,
-then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
+**Swift → `mr` invocation** — the app NEVER spawns `mr-capture` itself and never writes the
+  pidfile/heartbeat. It shells out to `mr` via `Process`. Candidate commands (resolved in
+  order at runtime, first available wins):
+  1. `mr start` / `mr stop` / `mr status` / `mr config set out_root <dir>` — if `mr` on PATH.
+  2. fallback: `python -m mr.cli <cmd>` — with the python resolved from an env hint
+     (`MR_PYTHON`), defaulting to trying `python3`, then a doc-configured absolute path.
+  The wrapper is centralized in `MRCLI.swift` so only one place sequences the fallback.
 
 ## Epics / Tasks (execution order)
 
-### Epic P1 — Core Python (Phase 1)
+### Epic MB-PY — Python backend (menu-bar dependencies; pure + fully unit-tested)
 | id | Task | Status | Depends |
 |----|------|--------|---------|
-| P1.1 | Scaffold package (pyproject, ruff, pytest, `mr/`+`mr/core/` dirs, git init, LICENSE, README stub, config.toml.example) | done | — |
-| P1.2 | `schema.py` dataclasses (Segment, Word, TranscriptionResult, CaptureMeta) | done | P1.1 |
-| P1.3 | `output.py` .md + optional JSON writer (+ tests) | done | P1.2 |
-| P1.4 | `merge.py` segment sort + echo dedup (+ tests w/ fixtures) | done | P1.2 |
-| P1.5 | `transcribe.py` Transcriber + MlxWhisperTranscriber + ModelNotCachedError (+ tests w/ mock) | done | P1.2, P1.1 |
-| P1.6 | `capture.py` Python wrapper: spawn/signal `mr-capture`, read `meta.json` | done | — |
-| P1.7 | `cli.py` with subcommand `process` (mic+system wav → .md) | done | P1.3..P1.6 |
-| P1.8 | P1 integration: `mr process` on scripted WAV data | done | P1.7 |
-| **PAUSE** | **Manual test: scripted conversation → capture (spike binary) → production transcribe+merge+output → attributed .md review** | **done** | P1.1..P1.5 |
+| MB-PY1 | `mr.config.set_out_root` atomic+validated write (preserves other keys) + tests | done | — |
+| MB-PY2 | `mr config set out_root <dir>` CLI command (+ tests) | done | MB-PY1 |
+| MB-PY3 | transcription heartbeat write/clear in `_do_stop` + reader + tests | done | — |
+| MB-PY4 | `mr config get out_root` CLI command (+ tests) — lets Swift learn the current root for folder-open/heartbeat base | done | MB-PY2 |
 
-### Epic P2 — Capture + control (Phase 2)
+### Epic MB-SW — Swift menu-bar app ("mrBar")
 | id | Task | Status | Depends |
 |----|------|--------|---------|
-| P2.1 | Productionize `capture/` (top-level Swift pkg, build.sh, Info.plist, install) | done | — |
-| P2.2 | `config.py` TOML config (outdir, model, language, dedup_threshold) | done | P1.1 |
-| P2.3 | `state.py` pidfile + recording state | done | P1.1 |
-| P2.4 | `cli.py` start/stop/toggle/status/doctor | done | P1.6, P2.1..P2.3 |
-| P2.5 | Completion notification (osascript) on stop→transcribe | done | P2.4 |
-| P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | done | P2.4 |
-| P2.7 | Simulated-conversation test doc (`docs/simulated-test-production.md`) + examples/manual README | done | P2.4, P2.6 |
-| P2.8 | `examples/manual/verify_transcript.py` — automated PASS/FAIL check on transcript + meta.json (for the human test) | done | P2.7 |
+| MB-SW1 | `menu-bar/` SwiftPM package scaffold, `mrBar` executable target, `AppInfo.swift` (resolve `mr`/python candidates), `build.sh`, `.gitignore` update | done | — |
+| MB-SW2 | `MRCLI.swift` Process wrappers (start/stop/status/config-set) + `TranscriptionState.swift` heartbeat reader (lazy, max-age sweep 300 s) | done | MB-SW1 |
+| MB-SW3 | `StatusItemController.swift` + `MenuBuilder.swift` + `main.swift`: NSStatusItem idle/live icon, dropdown menu, lazy refresh on open | done | MB-SW2 |
+| MB-SW4 | `StorageLocation.swift` (NSOpenPanel → `mr config set out_root`), Open Transcripts/Recordings folders, Info.plist (LSUIElement + mic/audio usage), entitlements, `install.sh` | done | MB-SW3 |
+| MB-SW5 | Compile whole package (sandbox-safe build), headless smoke of pure logic, `docs` manual-test doc (mirror `docs/simulated-test-production.md`), README note | in-progress | MB-SW4 |
 
-## Open / next — ALL ENGINEERING TASKS DONE ✅
-- **LIVE simulated-conversation test PASSED** (2026-10-12): real mic+system capture →
-  transcribe → attributed `.md` via the production `mr toggle` flow end-to-end.
-  `verify_transcript.py` verdict **PASS**: 8 You + 6 Them segments, timestamps ordered,
-  only real-duplicated "thank you." flagged (not echo). Both speakers correctly attributed
-  by stream origin, incl. the overlapping line #3. Recording: `/tmp/mr-live/out`. ✅
-- **Manual test PASSED** (2026-10-12): pipeline works end-to-end on real hardware
-  (`docs/manual-test-result.md`). Attribution + echo handling correct; speed ~15–63× realtime.
-- **Phase 1 Core COMPLETE + Epic P2 COMPLETE (this session, HEAD `8a49418`):**
-  - P1.6 `capture.py` RecordSession; P1.7 `cli.py process`; P1.8 integration.
-  - P2.1 `capture/` Swift package (top-level, `com.local.mr-capture`); P2.2 `config.py`;
-    P2.3 `state.py` pidfile; P2.4 `cli start/stop/toggle/status/doctor`; P2.5 osascript notify;
-    P2.6 README + permissions/troubleshooting docs; P2.7 production simulated-conversation test doc.
-  - Real `mr toggle`-style capture → transcribe → attributed `.md` VERIFIED end-to-end (P2.4).
-  - **99 tests pass; ruff clean.** Working tree clean.
-- **Remaining (HUMAN user, real hardware):** run the live simulated-conversation test in
-  `docs/simulated-test-production.md` (play scripted Them audio via `play_timed.sh`, speak You
-  lines, `mr toggle` start/stop) → validate attribution/echo/hallucination + the `.md`. Then the
-  project (Phase 1 + Phase 2, `mr toggle` goal) is verifiably complete.
-  - **✅ DONE (this session):** ran the live test → **PASS** (see above). Only remaining real-world
-    validation is a genuine multi-minute meeting recording (`~/Meetings`) for final confidence.
-- **Session handoff:** `docs/checkpoint.md` is the single resume guide (update for new commits).
+## Per-epic acceptance (commands the CTO agent runs to verify)
+
+- **MB-PY**: `./spike/.venv/bin/python -m pytest tests/ -q` (existing 106 + new all pass);
+  `./spike/.venv/bin/ruff check mr tests` clean.
+- **MB-SW**: `cd menu-bar && ./build.sh` produces a runnable binary (or at minimum a clean
+  `swift build -c release` with the sandbox-safe env); manual-test doc written. The GUI
+  event-loop behaviour (status item renders, perms) is HUMAN-verified per the manual-test doc;
+  the CTO agent verifies compilation + pure-logic smoke only.
+
+## Progress log
+
+- **(this session)** Started Epic MB (menu-bar app). Backlog refreshed from `MB_1_menubar_app.md`; plan + decomposition below.
+  - MB-PY1/2/3 done (config set_out_root, `mr config set out_root`, heartbeat). 133 Python tests pass, ruff clean.
+  - MB-SW1 done (package scaffold + AppInfo). MB-SW2 done (MRCLI + TranscriptionState + XCTest target).
+  - **`swift test` now GREEN (Xcode installed):** 17/17 tests pass via `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`. `build.sh` auto-selects the Xcode toolchain. One test bug fixed (TrailingZ fixture now emits a genuine UTC `Z`).
+  - **Environment note:** this host has only Xcode CommandLineTools (no Xcode.app), so `swift test` cannot run here (`XCTest` not found). Verification of Swift logic uses a Foundation-only runtime self-check harness (16 checks) + compile of the release binary. User chose to **install Xcode**; once installed, run `swift test` on `menu-bar/` for the real unit tests.
+  - **Cross-language fix (behind MB-SW2):** Python heartbeats now write a UTC-aware `Z`-suffixed `started_at` (was naive local) so Swift `ISO8601DateFormatter` parses it; Swift reader has a naive-local fallback. Verified end-to-end.
+- Prior history (Phase 1 + P2): see git log; all engineering done.
+
+## Open decisions (from `MB_1_menubar_app.md`, defaults adopted — see that file for the full decision log)
+
+1. Async stop → icon flips idle immediately; "Transcribing" section in the dropdown. **B1 heartbeat file.**
+2. Lazy refresh — icon/list computed only on dropdown open; no background timer.
+3. `mr` lookup — resolve candidates in order; explicit error menu item when none found.
+4. Non-sandboxed → use `NSOpenPanel` and spawn CLI from the app (TCC attributes permissions to the app).
+5. Store location edits the shared `~/.config/mr/config.toml` via `mr config set out_root`.
+6. Heartbeat path `<out_root>/.state/transcribing.json`; `max_age` = 300 s.
