@@ -84,8 +84,8 @@ then `**You (MM:SS):** …` / `**Them (MM:SS):** …` chronologically.
 | P2.1 | Productionize `capture/` (top-level Swift pkg, build.sh, Info.plist, install) | done | — |
 | P2.2 | `config.py` TOML config (outdir, model, language, dedup_threshold) | done | P1.1 |
 | P2.3 | `state.py` pidfile + recording state | done | P1.1 |
-| P2.4 | `cli.py` start/stop/toggle/status/doctor | in-progress | P1.6, P2.1..P2.3 |
-| P2.5 | Completion notification (osascript) on stop→transcribe | todo | P2.4 |
+| P2.4 | `cli.py` start/stop/toggle/status/doctor | done | P1.6, P2.1..P2.3 |
+| P2.5 | Completion notification (osascript) on stop→transcribe | in-progress | P2.4 |
 | P2.6 | README + hotkey (Shortcuts/Raycast) + permissions docs, LICENSE | todo | P2.4 |
 | P2.7 | End-to-end simulated conversation test (play scripted system audio; user replies) → verified attributed .md | todo | P2.4, P2.6 |
 

@@ -157,6 +157,25 @@ def _do_start(cfg: Config, aec: bool) -> None:
     typer.echo(f"recording started (stamp {stamp})\nout_dir: {out_dir}")
 
 
+def notify_complete(stamp: str, md_path: Path) -> bool:
+    """Post a macOS completion notification via ``osascript`` (fail-soft).
+
+    Returns ``True`` when the notification was posted (``osascript`` exited
+    0), ``False`` otherwise (binary missing, timeout, OS error). Never
+    raises — a notification is never blocking or required.
+    """
+    msg = f'Recording "{stamp}" transcribed -> {md_path.name}'.replace('"', '\\"')
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", f'display notification "{msg}" with title "mr"'],
+            capture_output=True,
+            timeout=10,
+        )
+        return proc.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
 def _do_stop(cfg: Config, json_sidecar: bool) -> None:
     """Stop the capture, transcribe, write the transcript, clear state.
 
@@ -194,6 +213,7 @@ def _do_stop(cfg: Config, json_sidecar: bool) -> None:
 
     clear_state(cfg.out_root)
     typer.echo(f"wrote {md}")
+    notify_complete(state.stamp, md)  # fail-soft; never blocks or raises
 
 
 # ---------------------------------------------------------------------------

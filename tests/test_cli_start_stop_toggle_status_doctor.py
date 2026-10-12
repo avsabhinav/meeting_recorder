@@ -10,13 +10,14 @@ from __future__ import annotations
 import os
 import re
 import signal
+import subprocess
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 import mr.cli
-from mr.cli import app
+from mr.cli import app, notify_complete
 from mr.config import Config
 from mr.core.transcribe import ModelNotCachedError
 from mr.state import RecordingState
@@ -143,6 +144,7 @@ def test_stop_happy(cfg, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
     cleared: list[str] = []
     monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
+    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: True)
     result = runner.invoke(app, ["stop"])
     assert result.exit_code == 0, result.output
     assert (os.getpid(), signal.SIGINT) in kills
@@ -198,11 +200,121 @@ def test_toggle_active_stops(cfg, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
     cleared: list[str] = []
     monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
+    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: True)
     result = runner.invoke(app, ["toggle"])
     assert result.exit_code == 0, result.output
     assert (os.getpid(), signal.SIGINT) in kills
     assert "wrote" in result.output and "transcripts/s1.md" in result.output
     assert cleared == [cfg.out_root]
+
+
+# ---------------------------------------------------------------------------
+# P2.5: osascript completion notification on stop/toggle
+# ---------------------------------------------------------------------------
+
+
+def test_notify_complete_success(monkeypatch) -> None:
+    calls: list[object] = []
+
+    def _fake_run(cmd: object, **kwargs: object) -> object:
+        calls.append((cmd, kwargs))
+
+        class _P:
+            returncode = 0
+
+        return _P()
+
+    monkeypatch.setattr(mr.cli.subprocess, "run", _fake_run)
+
+    assert notify_complete("s1", Path("/x/transcripts/s1.md")) is True
+    assert len(calls) == 1
+    cmd, kwargs = calls[0]
+    assert list(cmd)[:2] == ["osascript", "-e"]
+    assert cmd[2].startswith('display notification "')
+    assert cmd[2].endswith('with title "mr"')
+    assert kwargs.get("timeout") == 10
+
+
+def test_notify_complete_missing_osascript(monkeypatch) -> None:
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("osascript not found")
+
+    monkeypatch.setattr(mr.cli.subprocess, "run", _boom)
+
+    assert notify_complete("s1", Path("/x/transcripts/s1.md")) is False
+
+
+def test_notify_complete_timeout(monkeypatch) -> None:
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise subprocess.TimeoutExpired(cmd="osascript", timeout=10)
+
+    monkeypatch.setattr(mr.cli.subprocess, "run", _boom)
+
+    assert notify_complete("s1", Path("/x/transcripts/s1.md")) is False
+
+
+def test_notify_complete_escapes_quotes(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def _fake_run(cmd: object, **kwargs: object) -> object:
+        captured.append(cmd)
+
+        class _P:
+            returncode = 0
+
+        return _P()
+
+    monkeypatch.setattr(mr.cli.subprocess, "run", _fake_run)
+
+    assert notify_complete('a "quoted" stamp', Path("/x/transcripts/s1.md")) is True
+    script = captured[0][2]
+    assert '\\"quoted\\"' in script
+
+
+def test_stop_posts_notification_on_success(cfg, tmp_path, monkeypatch) -> None:
+    state = _make_active_state(cfg, tmp_path)
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: None)
+    notified: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md)) or True
+    )
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0, result.output
+    md_path = Path(cfg.out_root) / "transcripts" / "s1.md"
+    assert notified == [(state.stamp, md_path)]
+
+
+def test_stop_does_not_notify_when_not_recording(cfg, monkeypatch) -> None:
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: None)
+    notified: list[object] = []
+    monkeypatch.setattr(
+        mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md))
+    )
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0, result.output
+    assert "not recording" in result.output
+    assert notified == []
+
+
+def test_stop_does_not_notify_on_model_not_cached(cfg, tmp_path, monkeypatch) -> None:
+    state = _make_active_state(cfg, tmp_path)
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
+
+    def _boom(*args: object, **kwargs: object) -> Path:
+        raise ModelNotCachedError("model not cached")
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _boom)
+    notified: list[object] = []
+    monkeypatch.setattr(
+        mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md))
+    )
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 3
+    assert notified == []
 
 
 def test_doctor_offline(cfg, monkeypatch) -> None:
