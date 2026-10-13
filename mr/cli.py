@@ -7,8 +7,9 @@ Exposes the full captured pipeline from the terminal:
 - ``start``: spawn ``mr-capture`` (long-lived; outlives this command) and
   record the pidfile state.
 - ``status``: is a capture active? plus the most recent transcript.
-- ``stop``: SIGINT the capture, wait for its WAVs, transcribe + merge,
-  write ``transcripts/<stamp>.md``, then clear state.
+- ``stop``: SIGINT the capture, wait briefly for its WAVs, clear state,
+  and spawn ``mr _transcribe`` as a detached background process
+  (transcription + notification happen after ``mr stop`` returns).
 - ``toggle``: start if idle/stale, else stop.
 - ``doctor``: environment check (macOS version, helper binary, model cache);
   ``--fetch-model`` pre-downloads the Whisper model.
@@ -24,6 +25,7 @@ import os
 import platform
 import signal
 import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,15 +60,53 @@ def _root() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _spawn_capture(out_dir: str, binary: str) -> int:
+def _spawn_capture(out_dir: str, binary: str, log_path: Path | None = None) -> int:
     """Spawn the (long-lived) ``mr-capture`` helper and return its PID.
 
     The child must outlive this short-lived CLI process, so it is started
     with ``subprocess.Popen`` and not reaped here; the PID is persisted to
     the state pidfile by the caller.
+
+    The child's stdio is redirected to ``<out_dir>/.capture.log`` and the
+    process is detached with ``start_new_session=True``, so ``mr start``
+    never blocks on the child's pipes (a menu-bar app reading ``mr start``'s
+    stdout sees EOF as soon as ``mr start`` exits, even though
+    ``mr-capture`` keeps running).
     """
-    p = subprocess.Popen([binary, "--out", out_dir])
+    log_path = log_path or (Path(out_dir) / ".capture.log")
+    log_fh = open(log_path, "a", encoding="utf-8")
+    p = subprocess.Popen(
+        [binary, "--out", out_dir],
+        stdout=log_fh,
+        stderr=log_fh,
+        start_new_session=True,
+    )
+    log_fh.close()  # Popen dup'd the fd into the child
     return p.pid
+
+
+def _spawn_transcription(stamp: str, out_dir: str, *, json_sidecar: bool = False) -> bool:
+    """Spawn ``mr _transcribe`` as a detached background process (MB-BG/B2).
+
+    The child runs in its own session (``start_new_session=True``) with all
+    stdio discarded, so it outlives this short-lived CLI and ``mr stop``
+    returns immediately. The worker owns the transcription heartbeat and the
+    completion notification. Returns ``True`` if the process was spawned.
+    """
+    args = [sys.executable, "-m", "mr.cli", "_transcribe", stamp, out_dir]
+    if json_sidecar:
+        args.append("--json")
+    try:
+        subprocess.Popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return False
+    return True
 
 
 def _recordings_dir(cfg: Config) -> Path:
@@ -112,6 +152,34 @@ def _transcribe_and_write(
     if json_sidecar:
         write_json(md_path.with_suffix(".json"), render_transcript_json(merged, stamp=stamp))
     return md_path
+
+
+def _transcribe_worker(
+    cfg: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False
+) -> Path:
+    """Transcribe ``out_dir`` with a heartbeat around it (MB-BG background worker).
+
+    Writes the transcription heartbeat, transcribes + writes
+    ``transcripts/<stamp>.md`` (plus optional JSON sidecar), and clears the
+    heartbeat in ``finally`` — so the success path AND the
+    :class:`~mr.core.transcribe.ModelNotCachedError` path (exit 3) remove it.
+    When ``cfg.keep_audio`` is false the WAVs are deleted afterwards.
+    """
+    utc_now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    write_transcribing_heartbeat(cfg.out_root, stamp, utc_now)
+    try:
+        md = _transcribe_and_write(cfg, stamp, out_dir, json_sidecar=json_sidecar)
+    except ModelNotCachedError as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(code=3) from e
+    finally:
+        clear_transcribing_heartbeat(cfg.out_root, stamp)
+
+    if not cfg.keep_audio:
+        for name in ("mic.wav", "system.wav"):
+            (Path(out_dir) / name).unlink(missing_ok=True)
+
+    return md
 
 
 def _fetch_model(model: str) -> None:
@@ -178,11 +246,15 @@ def notify_complete(stamp: str, md_path: Path) -> bool:
 
 
 def _do_stop(cfg: Config, json_sidecar: bool) -> None:
-    """Stop the capture, transcribe, write the transcript, clear state.
+    """Stop the capture, clear state, and transcribe in the background.
 
-    Shared by ``stop`` and ``toggle``. On :class:`ModelNotCachedError` the
-    state pidfile is deliberately LEFT in place (exit code 3) so ``mr stop``
-    can be retried once the model is cached.
+    Shared by ``stop`` and ``toggle``. Signals ``mr-capture`` (SIGINT),
+    waits briefly for its WAVs to flush, clears the recording state, spawns
+    the hidden ``mr _transcribe`` worker as a detached background process,
+    and returns immediately (~1-2 s). The background worker owns the
+    transcription heartbeat and the completion notification; on
+    :class:`ModelNotCachedError` it exits with code 3, while ``mr stop``
+    itself stays exit 0 so a new recording can start right away.
     """
     state = read_state(cfg.out_root)
     if state is None:
@@ -212,27 +284,17 @@ def _do_stop(cfg: Config, json_sidecar: bool) -> None:
         typer.echo(f"recorded files missing for {state.stamp}; cleared stale recording state")
         return
 
-    # Heartbeat: visible to the menu-bar app while transcribing; cleared in
-    # ``finally`` so both success and the ModelNotCachedError path (exit 3)
-    # remove it. The timestamp is UTC-aware with a trailing ``Z`` so the
-    # Swift ``ISO8601DateFormatter`` (which requires a zone) can parse it.
-    utc_now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    write_transcribing_heartbeat(cfg.out_root, state.stamp, utc_now)
-    try:
-        md = _transcribe_and_write(cfg, state.stamp, state.out_dir, json_sidecar=json_sidecar)
-    except ModelNotCachedError as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(code=3) from e
-    finally:
-        clear_transcribing_heartbeat(cfg.out_root, state.stamp)
-
-    if not cfg.keep_audio:
-        for name in ("mic.wav", "system.wav"):
-            (Path(state.out_dir) / name).unlink(missing_ok=True)
-
+    # Transcription runs in a detached background process: the worker owns
+    # the heartbeat and the completion notification (and exits 3 on
+    # ModelNotCachedError), so this command never blocks on it.
+    spawned = _spawn_transcription(state.stamp, state.out_dir, json_sidecar=json_sidecar)
+    # Clear state ALWAYS — a new recording must be possible even if the
+    # background spawn failed.
     clear_state(cfg.out_root)
-    typer.echo(f"wrote {md}")
-    notify_complete(state.stamp, md)  # fail-soft; never blocks or raises
+    if spawned:
+        typer.echo(f"stopped recording {state.stamp} — transcribing in the background")
+    else:
+        typer.echo("stopped recording; error: could not start background transcription", err=True)
 
 
 def _do_config_set(key: str, value: str) -> None:
@@ -321,6 +383,19 @@ def process(
     typer.echo(f"kept {len(merged)} segments")
 
 
+@app.command(hidden=True, name="_transcribe")
+def transcribe_worker(
+    stamp: Annotated[str, typer.Argument(help="Recording stamp (folder name)")],
+    out_dir: Annotated[str, typer.Argument(help="Recording dir holding mic.wav/system.wav")],
+    json: Annotated[bool, typer.Option("--json", help="Also write a JSON sidecar")] = False,
+) -> None:
+    """Internal: transcribe a recording dir in the background (MB-BG)."""
+    cfg = load_config()
+    md = _transcribe_worker(cfg, stamp, out_dir, json_sidecar=json)
+    typer.echo(f"wrote {md}")
+    notify_complete(stamp, md)  # fail-soft; never blocks or raises
+
+
 @app.command()
 def start() -> None:
     """Start recording (spawns ``mr-capture``; it keeps running after exit)."""
@@ -358,7 +433,11 @@ def status() -> None:
 def stop(
     json: Annotated[bool, typer.Option("--json", help="Also write a JSON sidecar")] = False,
 ) -> None:
-    """Stop the capture, transcribe it, and write the attributed transcript."""
+    """Stop the capture and transcribe it in the background.
+
+    Returns immediately (~1-2 s): transcription continues in a detached
+    background process and posts a completion notification when done.
+    """
     _do_stop(load_config(), json)
 
 
@@ -366,7 +445,7 @@ def stop(
 def toggle(
     json: Annotated[bool, typer.Option("--json", help="JSON sidecar when stopping")] = False,
 ) -> None:
-    """Start recording if idle, otherwise stop it and write the transcript."""
+    """Start recording if idle, otherwise stop it (transcribing in the background)."""
     cfg = load_config()
     state = read_state(cfg.out_root)
     if state is None or is_clear(cfg.out_root) or is_stale(state):

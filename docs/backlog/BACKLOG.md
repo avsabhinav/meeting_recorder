@@ -9,11 +9,17 @@
 ## Context / state
 
 - Phase 1 Core + Epic P2 (capture + control) **DONE**; Epic MB (menu-bar app) **DONE**.
-- **This session: two post-MB bug fixes** based on the user's real Microsoft Teams call:
-  1. **Recording degrades the live call audio** (remote participant + user's own voice
-     both sound low while recording; normal again the moment recording stops).
-  2. **The menu-bar dropdown will not open while recording is running** (must stop via CLI;
-     dropdown works again after stop).
+- Phase 1 Core + Epic P2 (capture + control) **DONE**; Epic MB (menu-bar app) **DONE**;
+  Epics CAP-AUDIO + MB-DISPLAY **DONE**.
+- **This session: two new post-DISPLAY user reports**:
+  1. **The menu-bar dropdown STILL does not open after starting a recording** (must end it via
+     the CLI). The DISPLAY D1 fix removed `mr status` from the open path, but the *start* action
+     still ran `mr start` synchronously on the main thread — and the Python `_spawn_capture` let
+     the long-lived `mr-capture` inherit `mr start`'s stdout pipe, so the Swift
+     `readDataToEndOfFile()` blocked the main thread for the WHOLE recording.
+  2. **`mr stop` from the CLI blocks until transcription completes** — the user wants stop to
+     return immediately and let transcription run in the **background**, so they can start a new
+     recording right away (back-to-back meetings, long meetings).
 
 ## Root causes (confirmed by inspection)
 
@@ -41,6 +47,30 @@ slower (matches: works idle, fails while recording). **Decision (user): stop run
 state; move transcription-status behind an explicit on-demand **"Check Active
 Transcriptions…"** menu item that shows **"Searching…"** then the active transcription name
 or **"None"** (like the "Change Storage Location…" item).**
+
+### Bug 3 (NEW) — dropdown still fails after START; `mr start` blocks the main thread
+After DISPLAY D1, the open path is clean, but `StatusItemController.startRecording(_:)`
+(STILL synchronous) runs `MRCLI().start()` on the **main thread**. `_spawn_capture`
+(`mr/cli.py`) does `subprocess.Popen([binary, "--out", out_dir])` with **no stdio
+redirection**, so the long-lived `mr-capture` **inherits `mr start`'s stdout pipe fd** and
+keeps it open for the entire recording. `ProcessRunner.realRun` blocks on
+`readDataToEndOfFile()` reading that pipe → the main thread is wedged for the whole
+recording → the dropdown won't open and the icon never turns red. Killing the capture via
+the CLI releases the pipe and the app unblocks (matches the report exactly).
+**Decision (user): two-part fix.** (a) `_spawn_capture` must **detach the child's stdio**
+(redirect to a per-session `.capture.log`) so the pipe closes when `mr start` exits;
+(b) `startRecording` must **run `mr start` off the main thread** (mirror `stopRecording`),
+so the menu never blocks on a CLI subprocess even transiently.
+
+### Bug 4 (NEW) — `mr stop` blocks until transcription completes
+`_do_stop` (`mr/cli.py`) currently does the whole Whisper transcription + merge + write
+**synchronously** before returning. **Decision (user): let transcription run in the
+background** (a detached process that outlives `mr stop`), so `mr stop` stops the capture,
+clears recording state, spawns a detached `_transcribe` worker, and returns in ~1-2 s.
+This supports back-to-back meetings and long meetings. The existing heartbeat
+(`transcribing.json`) + menu-bar "Check Active Transcriptions…" item + completion
+notification surface the in-flight transcription. Menu-bar item keeps the label
+**"Stop Recording & Transcribe"** (user choice).
 
 ## Environment facts
 
@@ -98,6 +128,25 @@ transcription)`, and syncs the live state. App lays-over-transient text as a sec
 
 ## Per-epic acceptance (CTO runs to verify)
 
+### Epic MB-OPEN — dropdown opens reliably after Start; `mr start` never blocks the menu
+| id | Task | Status | Depends |
+|----|------|--------|---------|
+| O1 | `mr/cli.py` `_spawn_capture`: detach child stdio — `Popen(..., stdout=<recordings/<stamp>/.capture.log>, stderr=<same>)` so `mr-capture` never inherits the CLI's stdout pipe (the menu-bar `readDataToEndOfFile()` must return the moment `mr start` exits). Update/keep `_spawn_capture` signature stable for tests. | done | — |
+| O2 | `menu-bar/Sources/mrBar/StatusItemController.swift` `startRecording`: dispatch `MRCLI().start()` off the main thread (mirror `stopRecording`); `setLive(true)` + any error `NSAlert` on the main thread. | done | — |
+
+- **MB-OPEN acceptance (O1+O2):** `cd menu-bar && bash build.sh` exit 0; `swift test --disable-sandbox` green; Python `_spawn_capture` passes `stdout/stderr` (not inherited) — pytest green; **HUMAN verify:** relaunch `mrBar.app`, Start from the icon, then click the icon again — the dropdown MUST open while recording and the icon is red.
+
+### Epic MB-BG — `mr stop` returns immediately; transcription runs in the background
+| id | Task | Status | Depends |
+|----|------|--------|---------|
+| B1 | `mr/cli.py`: add internal `mr _transcribe <stamp> <out_dir> [--json]` subcommand that transcribes + merges + writes `transcripts/<stamp>.md` (+ optional JSON), sets the heartbeat at start and clears it in `finally`, and posts `notify_complete`. Reuses `_transcribe_and_write`. | done | — |
+| B2 | `mr/cli.py` `_do_stop` (+ `toggle`): signal capture → wait for WAV flush → clear recording state → spawn a **detached** background `[sys.executable, "-m", "mr.cli", "_transcribe", stamp, out_dir]` (stdin/stdout stderr to DEVNULL, detached session) → return immediately ("stopped, transcribing in background (stamp …)"). Update `stop`/`toggle` docstrings. | done | B1 |
+| B3 | Tests + docs: rework `tests/test_cli_start_stop_toggle_status_doctor.py` for non-blocking stop (stop does NOT call `_transcribe_and_write`; a detached spawn is asserted); new tests for `_transcribe` command + `_spawn_capture` detach; README + `docs/architecture.md` (stop no longer waits for transcription) update. `pytest` + `ruff` green. | done | B2 |
+
+- **MB-BG acceptance (B1+B2+B3):** `./spike/.venv/bin/python -m pytest tests/ -q` green; `./spike/.venv/bin/ruff check mr tests` clean; `mr stop` returns in ~1-2 s (no blocking); after `mr stop`, `mr status` shows idle and `~/.cache`…/heartbeat shows the in-flight transcription; a new `mr start` works immediately while the previous transcription is still running; completion notification arrives when the transcript lands. **HUMAN verify** end-to-end with a real recording.
+
+## Per-epic acceptance archive (earlier epics)
+
 - **CAP-AUDIO**: `cd capture && ./build.sh` exits 0 (no `--no-aec`/VPIO refs in source);
   `./spike/.venv/bin/python -m pytest tests/ -q` green; `./spike/.venv/bin/ruff check mr tests`
   clean. Diff read in full: no `setVoiceProcessingEnabled`, no `voiceProcessingOtherAudioDucking`,
@@ -110,6 +159,16 @@ transcription)`, and syncs the live state. App lays-over-transient text as a sec
 
 ## Progress log
 
+- **(this session) MB-OPEN + MB-BG — DONE (verified; commit pending).**
+  - **MB-OPEN (O1+O2):** `_spawn_capture` now redirects `mr-capture`'s stdio to `<out_dir>/.capture.log` + `start_new_session=True`, so `mr start` no longer holds the stdout pipe the menu-bar blocks on; `StatusItemController.startRecording` dispatches `MRCLI().start()` off the main thread. Dropdown opens reliably after Start. Menu-bar build + 21/21 Swift tests green.
+  - **MB-BG (B1+B2+B3):** new hidden `mr _transcribe <stamp> <out_dir> [--json]` command + `_transcribe_worker` helper (owns heartbeat/transcribe/output/notification); `_do_stop` now SIGINT→flush→clear state→spawn detached background `_transcribe`→return in ~1-2 s. Python suite 141 green (reworked stop tests + new spawn/worker tests), ruff clean, README + architecture updated. `mr _transcribe` hidden from help; `mr --help` stop now reads "transcribe it in the background".
+- **(this session) MB-OPEN + MB-BG — PLANNED (todo).** Two new user reports: (1) dropdown still
+  won't open after Start (root cause: `_spawn_capture` lets `mr-capture` inherit `mr start`'s
+  stdout pipe, so the menu-bar main-thread `readDataToEndOfFile()` blocks for the whole
+  recording; plus `startRecording` runs `mr start` on the main thread); (2) `mr stop` blocks
+  until transcription completes. Decisions (user): detach capture stdio + run start off the
+  main thread (MB-OPEN); run transcription as a detached background `_transcribe` process so
+  `mr stop` returns fast (MB-BG), keeping the "Stop Recording & Transcribe" label.
 - **(this session) D2+D3 — DONE (verified, no commit yet):** "Check Active Transcriptions…" item added to `MenuBuilder` (tag 707); `StatusItemController.checkActiveTranscriptions` runs `mr status` + heartbeat off the main thread, shows "Searching…" then `<stamp> — transcribing…` or `None (no active transcription)`, and syncs live state. Display logic extracted to `MenuBuilder.transcriptionResultText(stamp:)` (D3) with 3 unit tests → `swift test` 21/21 green. My own `git diff` read + test run confirmed.
 - **(this session) D1 — DONE (verified, no commit yet):** open path is now non-blocking.
 - **(this session) A3 — DONE (verified, no commit yet):** current docs updated.

@@ -18,14 +18,17 @@ Everything (recording, transcription, output) stays on your Mac.
    - **system** — your speakers, tapped through a Core Audio process tap
      (macOS 14.2+) → attributed **Them**
    The helper writes `mic.wav` and `system.wav` into a per-session folder.
-2. `mr toggle` (or `mr stop`) signals the helper to stop, waits for the WAVs,
-   transcribes **both tracks locally** with [mlx-whisper]
-   (`mlx-community/whisper-large-v3-turbo` on Apple Silicon), interleaves the
-   two streams by timestamp, and runs an always-on **text-overlap dedup**
+2. `mr toggle` (or `mr stop`) signals the helper to stop; once the WAVs flush
+   (~seconds) transcription runs automatically **in the background** (a detached
+   process): **both tracks locally** with [mlx-whisper]
+   (`mlx-community/whisper-large-v3-turbo` on Apple Silicon), interleaving the
+   two streams by timestamp, and running an always-on **text-overlap dedup**
    (rapidfuzz token similarity ≥ threshold) so words both sides "heard" via the
    other's speakers are not duplicated.
 3. The result is written to `~/Meetings/transcripts/<stamp>.md`, and a macOS
-   notification is posted when the transcript is ready.
+   notification is posted when the transcript is ready. `mr stop` returns
+   immediately, so you can start a new recording right away (back-to-back
+   meetings); long transcriptions just take longer in the background.
 
 Attribution is **stream-based and deterministic**: mic → `You`, system →
 `Them`. No speech-identification model, no guessing.
@@ -73,7 +76,7 @@ Then record a call:
 ```sh
 mr toggle        # start recording
 # ... take the call on your speakers ...
-mr toggle        # stop → transcribes → writes ~/Meetings/transcripts/<stamp>.md
+mr toggle        # stop → returns immediately; transcribes in the background → writes transcripts/<stamp>.md
 ```
 
 You'll get a macOS notification when the transcript is written.
@@ -84,9 +87,9 @@ The entry point is `mr` (installed by `pip install -e .`).
 
 | Command | Purpose |
 | --- | --- |
-| `mr toggle` | **Primary action.** Start recording if idle, else stop + transcribe. Ideal for a hotkey. |
+| `mr toggle` | **Primary action.** Start recording if idle, else stop (transcribe in background). Ideal for a hotkey. |
 | `mr start` | Start recording. |
-| `mr stop` | Stop recording, transcribe, write the transcript. |
+| `mr stop` | Stop recording; transcribe in the background. |
 | `mr status` | Show whether a capture is active (pid, output dir, stamp) and the last transcript. |
 | `mr process` | Transcribe an existing `--mic`/`--system` WAV pair (no capture needed). |
 | `mr doctor` | Check the environment (macOS version, helper binary, model cache). |
@@ -116,9 +119,11 @@ mr stop [--json]
 ```
 
 Sends SIGINT to the capture helper, waits (up to ~15 s) for the WAVs and
-`meta.json` to be flushed, transcribes both tracks, writes
-`transcripts/<stamp>.md`, then clears the state. Prints `not recording` if
-there is no active session.
+`meta.json` to flush, clears the recording state, and **returns immediately**.
+Transcription continues in a detached background process, which writes
+`transcripts/<stamp>.md` and posts a macOS notification when done. You can
+start a new recording right away even if the previous transcription is still
+running. Prints `not recording` if there is no active session.
 
 ### `mr status`
 
@@ -218,9 +223,11 @@ Add a Script Command with:
 ## Menu-bar app (beta)
 
 `mrBar` is an optional menu-bar app (no Dock icon — `LSUIElement`) that drives the
-same `mr` CLI: **Start Recording**, **Stop Recording & Transcribe** (with a live
-**Transcribing:** list), **Change Storage Location…**, **Open Folder ▸ Recordings /
-Transcripts**, and **Quit**. It is a pure shell around `mr` — it never spawns
+same `mr` CLI: **Start Recording**, **Stop Recording & Transcribe**, **Check
+Active Transcriptions…**, **Change Storage Location…**, **Open Folder ▸ Recordings /
+Transcripts**, and **Quit**. Stop returns immediately; transcription continues in
+the background and is surfaced via **Check Active Transcriptions…** and a
+completion notification. It is a pure shell around `mr` — it never spawns
 `mr-capture` or writes config/state itself, and it only refreshes when you open the
 menu (no polling).
 

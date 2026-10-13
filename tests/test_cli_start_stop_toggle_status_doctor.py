@@ -7,6 +7,7 @@ network.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import signal
@@ -14,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import mr.cli
@@ -57,6 +59,40 @@ def test_start_happy(cfg, monkeypatch) -> None:
     assert writes == [(5566, str(Path(cfg.out_root) / "recordings" / stamp), stamp)]
     assert (Path(cfg.out_root) / "recordings" / stamp).is_dir()
     assert "out_dir:" in result.output
+
+
+def test_spawn_capture_detaches_stdio(cfg, tmp_path, monkeypatch) -> None:
+    """MB-OPEN/O1: the child must NOT inherit ``mr start``'s stdio.
+
+    ``mr-capture`` is long-lived; if it kept the parent's stdout/stderr pipe
+    open, a blocking read (e.g. the menu-bar app) would stay blocked for the
+    whole recording. So ``_spawn_capture`` must redirect the child's stdio
+    to a per-session log file and detach it into its own process session.
+    """
+    recorded: dict[str, object] = {}
+
+    class _StubPopen:
+        pid = 5566
+
+        def __init__(self, argv: object, **kwargs: object) -> None:
+            recorded["argv"] = argv
+            recorded.update(kwargs)
+            # Capture the fd while it is still open (Popen dup's it into the child).
+            recorded["fileno_at_spawn"] = kwargs["stdout"].fileno()
+
+    monkeypatch.setattr(mr.cli.subprocess, "Popen", _StubPopen)
+
+    pid = mr.cli._spawn_capture(str(tmp_path), "/x/mr-capture")
+
+    assert pid == 5566
+    assert recorded["argv"] == ["/x/mr-capture", "--out", str(tmp_path)]
+    assert recorded["start_new_session"] is True
+    out = recorded["stdout"]
+    assert out is recorded["stderr"]
+    assert callable(out.fileno)
+    assert recorded["fileno_at_spawn"] >= 0
+    assert out.encoding == "utf-8"  # text stream, not raw bytes
+    assert (tmp_path / ".capture.log").is_file()
 
 
 def test_start_already_recording(cfg, monkeypatch) -> None:
@@ -145,14 +181,34 @@ def _make_active_state(cfg, tmp_path) -> RecordingState:
     return RecordingState(1, os.getpid(), str(out_dir), "s1", "2026-01-01T00:00:00")
 
 
-def _fake_transcribe_and_write(cfg, tmp_path):
-    def _fake(cfg_: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False) -> Path:
-        p = Path(cfg_.out_root) / "transcripts" / f"{stamp}.md"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(f"# Meeting — {stamp}\n", encoding="utf-8")
-        return p
+def test_spawn_transcription_detached(monkeypatch) -> None:
+    """MB-BG/B2: the worker must outlive ``mr stop`` and not hold its stdio."""
+    recorded: dict[str, object] = {}
 
-    return _fake
+    class _StubPopen:
+        def __init__(self, argv: object, **kwargs: object) -> None:
+            recorded["argv"] = argv
+            recorded.update(kwargs)
+
+    monkeypatch.setattr(mr.cli.subprocess, "Popen", _StubPopen)
+
+    assert mr.cli._spawn_transcription("s1", "/tmp/out", json_sidecar=True) is True
+    # argv ends with the `mr _transcribe` invocation (sys.executable first).
+    assert recorded["argv"][1:] == [
+        "-m", "mr.cli", "_transcribe", "s1", "/tmp/out", "--json"
+    ]
+    assert recorded["stdin"] is subprocess.DEVNULL
+    assert recorded["stdout"] is subprocess.DEVNULL
+    assert recorded["stderr"] is subprocess.DEVNULL
+    assert recorded["start_new_session"] is True
+
+
+def test_spawn_transcription_failure_returns_false(monkeypatch) -> None:
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise OSError("spawn failed")
+
+    monkeypatch.setattr(mr.cli.subprocess, "Popen", _boom)
+    assert mr.cli._spawn_transcription("s1", "/tmp/out") is False
 
 
 def test_stop_happy(cfg, tmp_path, monkeypatch) -> None:
@@ -160,18 +216,29 @@ def test_stop_happy(cfg, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
     kills: list[tuple[int, int]] = []
     monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: kills.append((pid, sig)))
-    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
+    spawns: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _spawn(stamp: str, out_dir: str, *, json_sidecar: bool = False) -> bool:
+        spawns.append(((stamp, out_dir), {"json_sidecar": json_sidecar}))
+        return True
+
+    monkeypatch.setattr(mr.cli, "_spawn_transcription", _spawn)
+    transcribed: list[object] = []
+    monkeypatch.setattr(
+        mr.cli, "_transcribe_and_write", lambda *a, **k: transcribed.append(a)
+    )
     cleared: list[str] = []
     monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
-    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: True)
     result = runner.invoke(app, ["stop"])
     assert result.exit_code == 0, result.output
     assert (os.getpid(), signal.SIGINT) in kills
-    assert "wrote" in result.output and "transcripts/s1.md" in result.output
-    assert (Path(cfg.out_root) / "transcripts" / "s1.md").is_file()
+    assert "transcribing in the background" in result.output
+    assert spawns == [((state.stamp, state.out_dir), {"json_sidecar": False})]
+    # Transcription must NOT run synchronously inside ``mr stop``.
+    assert transcribed == []
+    assert not (Path(cfg.out_root) / "transcripts" / "s1.md").exists()
+    # State is cleared so a new recording can start immediately.
     assert cleared == [cfg.out_root]
-    # keep_audio=True in the fixture: WAVs are left in place
-    assert (Path(state.out_dir) / "mic.wav").exists()
 
 
 def test_stop_missing_files_clears_state_without_transcribing(cfg, tmp_path, monkeypatch) -> None:
@@ -181,38 +248,49 @@ def test_stop_missing_files_clears_state_without_transcribing(cfg, tmp_path, mon
     state = RecordingState(1, 5566, str(out_dir), "s2", "2026-01-01T00:00:00")
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
     monkeypatch.setattr(mr.cli, "is_stale", lambda state: True)  # skip flush-wait
-    transcribed: list[object] = []
+    spawned: list[object] = []
     monkeypatch.setattr(
-        mr.cli, "_transcribe_and_write", lambda *a, **k: transcribed.append(a) or Path("/never")
+        mr.cli, "_spawn_transcription", lambda *a, **k: spawned.append((a, k)) or True
     )
     cleared: list[str] = []
     monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
-    notified: list[tuple[object, object]] = []
-    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md)))
     result = runner.invoke(app, ["stop"])
     assert result.exit_code == 0, result.output
     assert "Traceback" not in result.output
     assert "missing" in result.output
     assert cleared == [cfg.out_root]
-    assert transcribed == []  # transcription never attempted
-    assert notified == []  # no completion notification
+    assert spawned == []  # no background transcription spawned
 
 
-def test_stop_model_not_cached_keeps_state(cfg, tmp_path, monkeypatch) -> None:
+def test_stop_spawns_background_transcription(cfg, tmp_path, monkeypatch) -> None:
+    """MB-BG/B2: the sync exit-3 path is gone — stop spawns and returns 0.
+
+    The worker's exit-3-on-model-not-cached is covered by the B1
+    ``_transcribe_worker`` tests below.
+    """
     state = _make_active_state(cfg, tmp_path)
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
     monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
+    spawned: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def _boom(*args: object, **kwargs: object) -> Path:
-        raise ModelNotCachedError("model not cached")
+    def _spawn(stamp: str, out_dir: str, *, json_sidecar: bool = False) -> bool:
+        spawned.append(((stamp, out_dir), {"json_sidecar": json_sidecar}))
+        return True
 
-    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _boom)
+    monkeypatch.setattr(mr.cli, "_spawn_transcription", _spawn)
+    transcribed: list[object] = []
+    monkeypatch.setattr(
+        mr.cli, "_transcribe_and_write", lambda *a, **k: transcribed.append(a)
+    )
     cleared: list[str] = []
     monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
     result = runner.invoke(app, ["stop"])
-    assert result.exit_code == 3
-    assert "not cached" in result.output
-    assert cleared == []  # state left in place for retry
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    assert "transcribing in the background" in result.output
+    assert spawned == [((state.stamp, state.out_dir), {"json_sidecar": False})]
+    assert transcribed == []  # no synchronous transcription
+    assert cleared == [cfg.out_root]  # state cleared so a new recording is possible
 
 
 def test_toggle_idle_starts(cfg, monkeypatch) -> None:
@@ -239,14 +317,20 @@ def test_toggle_active_stops(cfg, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(mr.cli, "is_clear", lambda out_root: False)
     kills: list[tuple[int, int]] = []
     monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: kills.append((pid, sig)))
-    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
+    spawned: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _spawn(stamp: str, out_dir: str, *, json_sidecar: bool = False) -> bool:
+        spawned.append(((stamp, out_dir), {"json_sidecar": json_sidecar}))
+        return True
+
+    monkeypatch.setattr(mr.cli, "_spawn_transcription", _spawn)
     cleared: list[str] = []
     monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
-    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: True)
     result = runner.invoke(app, ["toggle"])
     assert result.exit_code == 0, result.output
     assert (os.getpid(), signal.SIGINT) in kills
-    assert "wrote" in result.output and "transcripts/s1.md" in result.output
+    assert "transcribing in the background" in result.output
+    assert spawned == [((state.stamp, state.out_dir), {"json_sidecar": False})]
     assert cleared == [cfg.out_root]
 
 
@@ -313,22 +397,6 @@ def test_notify_complete_escapes_quotes(monkeypatch) -> None:
     assert '\\"quoted\\"' in script
 
 
-def test_stop_posts_notification_on_success(cfg, tmp_path, monkeypatch) -> None:
-    state = _make_active_state(cfg, tmp_path)
-    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
-    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
-    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake_transcribe_and_write(cfg, tmp_path))
-    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: None)
-    notified: list[tuple[str, Path]] = []
-    monkeypatch.setattr(
-        mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md)) or True
-    )
-    result = runner.invoke(app, ["stop"])
-    assert result.exit_code == 0, result.output
-    md_path = Path(cfg.out_root) / "transcripts" / "s1.md"
-    assert notified == [(state.stamp, md_path)]
-
-
 def test_stop_does_not_notify_when_not_recording(cfg, monkeypatch) -> None:
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: None)
     notified: list[object] = []
@@ -341,24 +409,6 @@ def test_stop_does_not_notify_when_not_recording(cfg, monkeypatch) -> None:
     assert notified == []
 
 
-def test_stop_does_not_notify_on_model_not_cached(cfg, tmp_path, monkeypatch) -> None:
-    state = _make_active_state(cfg, tmp_path)
-    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
-    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
-
-    def _boom(*args: object, **kwargs: object) -> Path:
-        raise ModelNotCachedError("model not cached")
-
-    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _boom)
-    notified: list[object] = []
-    monkeypatch.setattr(
-        mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md))
-    )
-    result = runner.invoke(app, ["stop"])
-    assert result.exit_code == 3
-    assert notified == []
-
-
 # ---------------------------------------------------------------------------
 # MB-PY3: transcription heartbeat — written before transcription, cleared
 # (via finally) on success AND on the model-not-cached path. Real mr.heartbeat
@@ -366,52 +416,46 @@ def test_stop_does_not_notify_on_model_not_cached(cfg, tmp_path, monkeypatch) ->
 # ---------------------------------------------------------------------------
 
 
-def test_stop_writes_heartbeat_during_transcription(cfg, tmp_path, monkeypatch) -> None:
+def test_stop_does_not_write_heartbeat_or_notify(cfg, tmp_path, monkeypatch) -> None:
+    """MB-BG/B2: the heartbeat + notification are owned by the worker, not stop.
+
+    (The worker-side heartbeat/notify behaviour is covered by the B1
+    ``_transcribe_worker`` / ``_transcribe`` tests below.)
+    """
     state = _make_active_state(cfg, tmp_path)
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
     monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
-    observed: dict[str, object] = {}
-
-    def _fake(cfg_: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False) -> Path:
-        # While transcribing, the heartbeat for this stamp must be present.
-        observed["during"] = read_transcribing_heartbeat(cfg_.out_root)
-        p = Path(cfg_.out_root) / "transcripts" / f"{stamp}.md"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(f"# Meeting — {stamp}\n", encoding="utf-8")
-        return p
-
-    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake)
+    hb_writes: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        mr.cli,
+        "write_transcribing_heartbeat",
+        lambda *a, **k: hb_writes.append(((a), k)),
+    )
+    hb_clears: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        mr.cli,
+        "clear_transcribing_heartbeat",
+        lambda *a, **k: hb_clears.append(((a), k)),
+    )
+    notified: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md)) or True
+    )
+    transcribed: list[object] = []
+    monkeypatch.setattr(
+        mr.cli, "_transcribe_and_write", lambda *a, **k: transcribed.append(a)
+    )
     monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: None)
-    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: True)
     result = runner.invoke(app, ["stop"])
     assert result.exit_code == 0, result.output
-    during = observed["during"]
-    assert during is not None and during["stamp"] == state.stamp
-    assert during["out_root"] == str(Path(cfg.out_root).resolve())
-    # The timestamp must be UTC-aware and Z-suffixed so Swift ISO8601DateFormatter
-    # (which requires a zone) can parse it.
-    assert during["started_at"].endswith("Z")
-    assert during["started_at"].startswith("20")
-    # After stop completes, the heartbeat is cleared (file gone).
-    assert read_transcribing_heartbeat(cfg.out_root) is None
-    assert not heartbeat_path(cfg.out_root).exists()
-
-
-def test_stop_clears_heartbeat_on_model_not_cached(cfg, tmp_path, monkeypatch) -> None:
-    state = _make_active_state(cfg, tmp_path)
-    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
-    monkeypatch.setattr(mr.cli.os, "kill", lambda pid, sig: None)
-
-    def _boom(*args: object, **kwargs: object) -> Path:
-        raise ModelNotCachedError("model not cached")
-
-    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _boom)
-    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: None)
-    result = runner.invoke(app, ["stop"])
-    assert result.exit_code == 3
-    assert "not cached" in result.output
-    # finally must have cleared the heartbeat even on the error path.
-    assert read_transcribing_heartbeat(cfg.out_root) is None
+    assert "Traceback" not in result.output
+    assert "transcribing in the background" in result.output
+    # None of these are the stop command's job any more — the worker does them.
+    assert hb_writes == []
+    assert hb_clears == []
+    assert notified == []
+    assert transcribed == []
+    # No heartbeat file was ever created on disk either.
     assert not heartbeat_path(cfg.out_root).exists()
 
 
@@ -425,6 +469,97 @@ def test_stop_not_recording_writes_no_heartbeat(cfg, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "not recording" in result.output
     assert writes == []
+    assert read_transcribing_heartbeat(cfg.out_root) is None
+
+
+# ---------------------------------------------------------------------------
+# MB-BG/B1: ``mr _transcribe`` hidden background worker — same
+# heartbeat/write/clear contract as ``_do_stop``, invoked directly.
+# ---------------------------------------------------------------------------
+
+
+def test_transcribe_worker_writes_and_clears_heartbeat(cfg, tmp_path, monkeypatch) -> None:
+    out_dir = tmp_path / "recordings" / "s1"
+    out_dir.mkdir(parents=True)
+    observed: dict[str, object] = {}
+
+    def _fake(cfg_: Config, stamp: str, out_dir_: str, *, json_sidecar: bool = False) -> Path:
+        # While transcribing, the heartbeat for this stamp must be present.
+        hb = read_transcribing_heartbeat(cfg_.out_root)
+        assert hb is not None
+        assert hb["stamp"] == "s1"
+        observed["during"] = hb
+        p = Path(cfg_.out_root) / "transcripts" / f"{stamp}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"# Meeting — {stamp}\n", encoding="utf-8")
+        return p
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake)
+    md = mr.cli._transcribe_worker(cfg, "s1", str(out_dir))
+    assert md == Path(cfg.out_root) / "transcripts" / "s1.md"
+    assert md.is_file()
+    # The timestamp must be UTC-aware and Z-suffixed (Swift ISO8601DateFormatter).
+    assert observed["during"]["started_at"].endswith("Z")
+    # After the worker returns, the heartbeat is cleared (file gone).
+    assert read_transcribing_heartbeat(cfg.out_root) is None
+    assert not heartbeat_path(cfg.out_root).exists()
+
+
+def test_transcribe_worker_model_not_cached_clears_heartbeat(cfg, tmp_path, monkeypatch) -> None:
+    out_dir = tmp_path / "recordings" / "s1"
+    out_dir.mkdir(parents=True)
+
+    def _boom(*args: object, **kwargs: object) -> Path:
+        raise ModelNotCachedError("model not cached")
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _boom)
+    with pytest.raises(typer.Exit) as excinfo:
+        mr.cli._transcribe_worker(cfg, "s1", str(out_dir))
+    assert excinfo.value.exit_code == 3
+    # finally must have cleared the heartbeat even on the error path.
+    assert read_transcribing_heartbeat(cfg.out_root) is None
+    assert not heartbeat_path(cfg.out_root).exists()
+
+
+def test_transcribe_worker_removes_wavs_when_keep_audio_false(cfg, tmp_path, monkeypatch) -> None:
+    cfg = dataclasses.replace(cfg, keep_audio=False)
+    out_dir = tmp_path / "recordings" / "s1"
+    out_dir.mkdir(parents=True)
+    (out_dir / "mic.wav").write_bytes(b"RIFF")
+    (out_dir / "system.wav").write_bytes(b"RIFF")
+
+    def _fake(cfg_: Config, stamp: str, out_dir_: str, *, json_sidecar: bool = False) -> Path:
+        p = Path(cfg_.out_root) / "transcripts" / f"{stamp}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"# Meeting — {stamp}\n", encoding="utf-8")
+        return p
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake)
+    mr.cli._transcribe_worker(cfg, "s1", str(out_dir))
+    assert not (out_dir / "mic.wav").exists()
+    assert not (out_dir / "system.wav").exists()
+
+
+def test_transcribe_command_happy_path(cfg, tmp_path, monkeypatch) -> None:
+    out_dir = tmp_path / "recordings" / "s1"
+    out_dir.mkdir(parents=True)
+
+    def _fake(cfg_: Config, stamp: str, out_dir_: str, *, json_sidecar: bool = False) -> Path:
+        p = Path(cfg_.out_root) / "transcripts" / f"{stamp}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"# Meeting — {stamp}\n", encoding="utf-8")
+        return p
+
+    monkeypatch.setattr(mr.cli, "_transcribe_and_write", _fake)
+    notified: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md)) or True
+    )
+    result = runner.invoke(app, ["_transcribe", "s1", str(out_dir)])
+    assert result.exit_code == 0, result.output
+    assert "wrote" in result.output
+    assert (Path(cfg.out_root) / "transcripts" / "s1.md").is_file()
+    assert notified == [("s1", Path(cfg.out_root) / "transcripts" / "s1.md")]
     assert read_transcribing_heartbeat(cfg.out_root) is None
 
 

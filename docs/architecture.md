@@ -12,7 +12,7 @@ Ties the Phase 0 spike findings to the production architecture (see `PLAN.md`,
 ## Module map
 ```
 mr/
-  cli.py          # typer app: start|stop|toggle|process|status|doctor
+  cli.py          # typer app: start|stop (async transcribe)|toggle|process|status|doctor
   config.py       # load ~/.config/mr/config.toml
   state.py        # pidfile / recording state (~/Meetings/.state)
   core/
@@ -51,11 +51,14 @@ examples/demo/    # sample aligned WAVs + generated .md
 ## Pipeline for one recording
 1. `mr toggle` (idle) → `mr start` → spawn `mr-capture --out ~/Meetings/recordings/<stamp>`
    → write pidfile.
-2. `mr toggle` (active) → `mr stop` → SIGINT `mr-capture` → finalized WAVs + meta.json.
-3. `transcribe` both tracks (sequential) → `TranscriptionResult`s.
+2. `mr toggle` (active) → `mr stop` → SIGINT `mr-capture` → finalized WAVs + meta.json
+   → clear the recording pidfile → spawn a **detached background `mr _transcribe`
+   process and return immediately** (a new recording can start right away).
+3. Background `mr _transcribe` writes the `transcribing.json` heartbeat, then
+   `transcribe` both tracks (sequential) → `TranscriptionResult`s.
 4. `merge_transcripts(you, them, dedup_threshold=0.6)` → sorted, deduped segments.
 5. `output` → `~/Meetings/transcripts/<stamp>.md` (+ optional JSON sidecar).
-6. `osascript` notification.
+6. `osascript` completion notification, then clear the heartbeat.
 
 ## Verifiable acceptance (commands)
 - `ruff check mr tests` clean; `pytest -q` green.
