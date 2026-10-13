@@ -31,10 +31,18 @@ final class MenuBuilder {
     func rebuild(status: MRStatus, isCLIAvailable: Bool, transcribing: [TranscriptionState.Heartbeat]) {
         menu.removeAllItems()
 
-        // MB-SW7: inert first row. macOS highlights the first item when the
-        // menu opens, so it must not be an action — a disabled status header
-        // means an accidental click-through hits nothing.
-        menu.addItem(disabledItem(statusHeader(status)))
+        // MB-SW10: first row is ENABLED but harmless. A single icon click opens the
+        // menu and macOS auto-activates the first ENABLED actionable item (it skips
+        // disabled rows), so this row — not "Start Recording" — absorbs the accidental
+        // activation. Its action is a no-op.
+        let header = NSMenuItem(
+            title: statusHeader(status),
+            action: #selector(StatusItemController.statusHeaderClicked(_:)),
+            keyEquivalent: ""
+        )
+        header.target = target
+        header.isEnabled = true
+        menu.addItem(header)
 
         let start = NSMenuItem(
             title: "Start Recording",

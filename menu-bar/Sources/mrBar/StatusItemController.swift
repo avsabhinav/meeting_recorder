@@ -278,6 +278,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// No-op: row-1 status header absorbs an accidental icon-click activation (MB-SW10).
+    @objc func statusHeaderClicked(_ sender: Any?) {}
+
     /// "Quit" → terminate the app.
     @objc func quit(_ sender: Any?) {
         NSApp.terminate(nil)
