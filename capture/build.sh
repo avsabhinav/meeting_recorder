@@ -35,4 +35,4 @@ echo "==> codesign (adhoc)"
 codesign --force --sign - "$BIN"
 
 echo "==> done: $BIN"
-echo "==> run with: $BIN --out <dir> [--no-aec]"
+echo "==> run with: $BIN --out <dir>"

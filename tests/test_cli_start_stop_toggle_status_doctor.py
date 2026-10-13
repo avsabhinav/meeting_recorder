@@ -41,7 +41,7 @@ def cfg(tmp_path, monkeypatch) -> Config:
 
 
 def test_start_happy(cfg, monkeypatch) -> None:
-    monkeypatch.setattr(mr.cli, "_spawn_capture", lambda out_dir, binary, aec: 5566)
+    monkeypatch.setattr(mr.cli, "_spawn_capture", lambda out_dir, binary: 5566)
     monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
     writes: list[tuple[int, str, str]] = []
     monkeypatch.setattr(
@@ -218,9 +218,9 @@ def test_stop_model_not_cached_keeps_state(cfg, tmp_path, monkeypatch) -> None:
 def test_toggle_idle_starts(cfg, monkeypatch) -> None:
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: None)
     monkeypatch.setattr(mr.cli, "is_clear", lambda out_root: True)
-    spawned: list[tuple[str, str, bool]] = []
-    def _spawn(out_dir: str, binary: str, aec: bool) -> int:
-        spawned.append((out_dir, binary, aec))
+    spawned: list[tuple[str, str]] = []
+    def _spawn(out_dir: str, binary: str) -> int:
+        spawned.append((out_dir, binary))
         return 5566
 
     monkeypatch.setattr(mr.cli, "_spawn_capture", _spawn)
@@ -231,7 +231,6 @@ def test_toggle_idle_starts(cfg, monkeypatch) -> None:
     assert "recording started" in result.output
     assert len(spawned) == 1
     assert spawned[0][1] == "/x/mr-capture"
-    assert spawned[0][2] is True  # aec default
 
 
 def test_toggle_active_stops(cfg, tmp_path, monkeypatch) -> None:

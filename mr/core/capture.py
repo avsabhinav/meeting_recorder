@@ -4,7 +4,7 @@ Phase 1: drives the spike-built ``mr-capture`` binary (Swift, macOS-only) so the
 pipeline can be exercised end-to-end before P2.1 productionizes capture.
 
 Binary contract (see ``spike/SPIKE_RESULTS.md``):
-``mr-capture --out <dir> [--no-aec]`` records until it receives SIGINT or
+``mr-capture --out <dir>`` records until it receives SIGINT or
 SIGTERM, then writes ``mic.wav`` / ``system.wav`` (16 kHz mono s16le) and
 ``meta.json`` into ``<dir>`` and exits 0.
 
@@ -80,11 +80,9 @@ class RecordSession:
         self,
         out_dir: str,
         *,
-        aec: bool = True,
         capture_bin: str | None = None,
     ) -> None:
         self.out_dir = str(Path(out_dir).resolve())
-        self.aec = aec
         self.capture_bin = capture_bin
         self.proc: subprocess.Popen[bytes] | None = None
         self.meta: CaptureMeta | None = None
@@ -102,8 +100,6 @@ class RecordSession:
             bin_path = assert_capture_bin()
         os.makedirs(self.out_dir, exist_ok=True)
         cmd = [bin_path, "--out", self.out_dir]
-        if not self.aec:
-            cmd.append("--no-aec")
         self.proc = subprocess.Popen(cmd)
         return self
 

@@ -1,7 +1,7 @@
 import Foundation
 
-// mr-capture — spike: system audio (process tap) + mic (AVAudioEngine, optional AEC) -> 16 kHz mono WAVs.
-// Usage: mr-capture --out <dir> [--no-aec]
+// mr-capture — spike: system audio (process tap) + mic (AVAudioEngine, raw) -> 16 kHz mono WAVs.
+// Usage: mr-capture --out <dir>
 // Runs until SIGINT/SIGTERM, then finalizes the WAVs and exits 0.
 
 func die(_ msg: String, _ code: Int32 = 1) -> Never {
@@ -14,22 +14,18 @@ func log(_ msg: String) { FileHandle.standardError.write(Data((msg + "\n").utf8)
 
 let args = Array(CommandLine.arguments.dropFirst())
 var outArg: String?
-var aec = true
 var i = 0
 while i < args.count {
     let a = args[i]
     if a == "--out" {
-        guard i + 1 < args.count else { die("usage: mr-capture --out <dir> [--no-aec]", 2) }
+        guard i + 1 < args.count else { die("usage: mr-capture --out <dir>", 2) }
         outArg = (args[i + 1] as NSString).expandingTildeInPath
         i += 2
-    } else if a == "--no-aec" {
-        aec = false
-        i += 1
     } else {
-        die("usage: mr-capture --out <dir> [--no-aec]", 2)
+        die("usage: mr-capture --out <dir>", 2)
     }
 }
-guard let outDir = outArg else { die("usage: mr-capture --out <dir> [--no-aec]", 2) }
+guard let outDir = outArg else { die("usage: mr-capture --out <dir>", 2) }
 do {
     try FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 } catch { die("cannot create \(outDir): \(error)", 2) }
@@ -40,11 +36,11 @@ do {
 // both start about the same time.
 let mic: MicCapture
 do { mic = try MicCapture(outPath: outDir + "/mic.wav") } catch { die("\(error)") }
-do { try mic.start(aec: aec) } catch {
+do { try mic.start() } catch {
     mic.writer.close()
     die("mic: \(error)")
 }
-log("mic: \(mic.deviceName) @ \(mic.nativeSampleRate) Hz x\(mic.nativeChannels) (aec=\(mic.aecEnabled))")
+log("mic: \(mic.deviceName) @ \(mic.nativeSampleRate) Hz x\(mic.nativeChannels)")
 
 let systemWriter: WavWriter
 do { systemWriter = try WavWriter(path: outDir + "/system.wav") } catch { die("\(error)") }
@@ -68,7 +64,7 @@ func writeMeta(_ dir: String) {
     let firstSysHost = system.firstSampleHostTime              // mach UInt64
     let meta: [String: Any] = [
         "macos_version": ProcessInfo.processInfo.operatingSystemVersionString,
-        "aec": mic.aecEnabled,
+        "aec": false,
         "started_at": ISO8601DateFormatter().string(from: Date()),
         "duration_seconds": max(mic.writer.durationSeconds, systemWriter.durationSeconds),
         "mic": [

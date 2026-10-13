@@ -85,7 +85,7 @@ def test_enter_creates_outdir_and_spawns(
 
     out_dir = tmp_path / "nested" / "rec1"
     assert not out_dir.exists()
-    session = RecordSession(str(out_dir), aec=False)
+    session = RecordSession(str(out_dir))
     with session:
         pass
 
@@ -93,12 +93,11 @@ def test_enter_creates_outdir_and_spawns(
     abs_outdir = str(Path(out_dir).resolve())
     assert args[0].endswith("fake-mr-capture")
     assert args[1:3] == ["--out", abs_outdir]
-    assert "--no-aec" in args
     assert out_dir.is_dir()
     assert session.out_dir == abs_outdir
 
 
-def test_enter_args_default_aec(
+def test_enter_args_plain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -109,7 +108,8 @@ def test_enter_args_default_aec(
     with RecordSession(str(tmp_path / "rec")):
         pass
     args = popen.call_args[0][0]
-    assert "--no-aec" not in args
+    assert args[1:3] == ["--out", str(Path(tmp_path / "rec").resolve())]
+    assert len(args) == 3
 
 
 class FakeProc:

@@ -28,12 +28,15 @@ examples/demo/    # sample aligned WAVs + generated .md
 
 ## Design decisions carried from the spike
 1. **Capture reality:** the Core Audio process tap is read via a **private aggregate
-   device + IOProc** (not AudioQueue). VPIO input (AEC on) reports **9 channels**;
-   user voice is **channel 0**. Encode both into `mr-capture` production code and
-   keep the spike gotchas (INVESTIGATION.md) as comments/README.
-2. **Echo philosophy:** AEC (voice-processing I/O) does the heavy lifting; the
-   merge-time **text-overlap dedup** (rapidfuzz token_ratio ≥ 0.6 over time-overlap)
-   is the always-on safety net for cases AEC can't cancel (other apps' audio).
+   device + IOProc** (not AudioQueue). Voice processing (VPIO) was **removed** — a
+   real call showed it degraded audio (the spike originally noted VPIO input, AEC on,
+   reports **9 channels** with user voice on **channel 0**); the mic is now a
+   **raw 1-channel tap**. Keep the spike gotchas (INVESTIGATION.md) as
+   comments/README.
+2. **Echo philosophy:** capture is **RAW** (no voice processing by design, so
+   recording never degrades an active call); the merge-time **text-overlap dedup**
+   (rapidfuzz token_ratio ≥ `dedup_threshold`, default 0.6, over time-overlap) is
+   the **sole** echo handling.
 3. **Model handling:** load by HF repo id only so `mlx-whisper`/`huggingface_hub`
    use the **standard HF hub cache**; never a custom cache_dir. At call time run
    **cache-only** (`HF_HUB_OFFLINE=1`, `local_files_only`). Pre-fetch + report via

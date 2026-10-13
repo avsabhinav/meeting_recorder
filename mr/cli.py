@@ -58,14 +58,14 @@ def _root() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _spawn_capture(out_dir: str, binary: str, aec: bool) -> int:
+def _spawn_capture(out_dir: str, binary: str) -> int:
     """Spawn the (long-lived) ``mr-capture`` helper and return its PID.
 
     The child must outlive this short-lived CLI process, so it is started
     with ``subprocess.Popen`` and not reaped here; the PID is persisted to
     the state pidfile by the caller.
     """
-    p = subprocess.Popen([binary, "--out", out_dir] + ([] if aec else ["--no-aec"]))
+    p = subprocess.Popen([binary, "--out", out_dir])
     return p.pid
 
 
@@ -140,7 +140,7 @@ def _model_cached(model: str) -> bool:
         return (Path.home() / ".cache" / "huggingface" / "hub" / repo_dir).is_dir()
 
 
-def _do_start(cfg: Config, aec: bool) -> None:
+def _do_start(cfg: Config) -> None:
     """Start a capture (shared by ``start`` and ``toggle``)."""
     if not is_clear(cfg.out_root):
         state = read_state(cfg.out_root)
@@ -153,7 +153,7 @@ def _do_start(cfg: Config, aec: bool) -> None:
     out_dir = _recordings_dir(cfg) / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
     binary = assert_capture_bin()
-    pid = _spawn_capture(str(out_dir), binary, aec)
+    pid = _spawn_capture(str(out_dir), binary)
     write_state(cfg.out_root, pid, str(out_dir), stamp, datetime.now().isoformat())
     typer.echo(f"recording started (stamp {stamp})\nout_dir: {out_dir}")
 
@@ -322,13 +322,9 @@ def process(
 
 
 @app.command()
-def start(
-    aec: Annotated[
-        bool, typer.Option("--aec/--no-aec", help="Enable AEC on the capture helper")
-    ] = True,
-) -> None:
+def start() -> None:
     """Start recording (spawns ``mr-capture``; it keeps running after exit)."""
-    _do_start(load_config(), aec)
+    _do_start(load_config())
 
 
 @app.command()
@@ -368,14 +364,13 @@ def stop(
 
 @app.command()
 def toggle(
-    aec: Annotated[bool, typer.Option("--aec/--no-aec", help="AEC when starting")] = True,
     json: Annotated[bool, typer.Option("--json", help="JSON sidecar when stopping")] = False,
 ) -> None:
     """Start recording if idle, otherwise stop it and write the transcript."""
     cfg = load_config()
     state = read_state(cfg.out_root)
     if state is None or is_clear(cfg.out_root) or is_stale(state):
-        _do_start(cfg, aec)
+        _do_start(cfg)
     else:
         _do_stop(cfg, json)
 

@@ -1,4 +1,4 @@
-# MR Backlog — Production Build (Phase 1 → Phase 2 → MB Epic: menu-bar app)
+# MR Backlog — Production Build (Phase 1 → Phase 2 → MB Epic → CAP/MB fixes)
 
 > Single source of truth for the production `mr` build. Lead (CTO agent) maintains
 > this file and the mirrored `todo_write`. Statuses: `todo → in-progress → review →
@@ -8,135 +8,114 @@
 
 ## Context / state
 
-- Phase 0 spike **GO**; Phase 1 Core **DONE**; Epic P2 (capture + control) **DONE**.
-- Live simulated-conversation test **PASSED** (2026-10-12): production `mr toggle`
-  → real capture → transcribe → attributed `.md` end-to-end. 106 tests pass; ruff clean.
-- **This session: Epic MB** — a macOS menu-bar app ("mrBar") that starts/stops
-  recording and shows in-progress transcriptions, per `docs/tasks/MB_1_menubar_app.md`
-  (the user-authored feature brief; guiding contract locked in `PLAN.md` §3).
+- Phase 1 Core + Epic P2 (capture + control) **DONE**; Epic MB (menu-bar app) **DONE**.
+- **This session: two post-MB bug fixes** based on the user's real Microsoft Teams call:
+  1. **Recording degrades the live call audio** (remote participant + user's own voice
+     both sound low while recording; normal again the moment recording stops).
+  2. **The menu-bar dropdown will not open while recording is running** (must stop via CLI;
+     dropdown works again after stop).
 
-## Environment facts (re-confirmed this session)
+## Root causes (confirmed by inspection)
+
+### Bug 1 — capture-time echo cancellation (VPIO) degrades the call
+`capture/Sources/mr-capture/MicCapture.swift` enables AVAudioEngine voice processing
+(VPIO) by default and connects `engine.mainMixerNode → engine.outputNode`, which starts a
+voice-chat IO unit that:
+- grabs the mic in voice-chat mode (AGC / high-pass / echo suppression → attenuates the
+  near-end voice),
+- renders through the physical output device and triggers macOS to duck "other audio"
+  (the remote participant's voice from Teams).
+Both symptoms disappear the moment recording stops. A VPIO session cannot run on the same
+mic+output as an active VoIP call without degrading it. **Decision (user): record the raw
+mic with no voice processing at all; echo is handled by the existing merge-time text-overlap
+dedup (the architecture's documented safety net). Recording becomes invisible to the call.**
+
+### Bug 2 — dropdown blocked by synchronous `mr status` on every open
+`StatusItemController.togglePressed` → `refresh()` calls `MRCLI().status()` on the **main
+thread**, and `ProcessRunner.realRun` blocks on `readDataToEndOfFile()`, then
+`NSMenu.popUp` runs inside the status-bar button's tracking event. Blocking the main
+thread mid-track and popping the menu synchronously inside a tracking event is a
+known-fragile AppKit pattern; it fails intermittently once the live state makes the path
+slower (matches: works idle, fails while recording). **Decision (user): stop running
+`mr status` on every open; drive Start/Stop enablement from the app's locally-tracked live
+state; move transcription-status behind an explicit on-demand **"Check Active
+Transcriptions…"** menu item that shows **"Searching…"** then the active transcription name
+or **"None"** (like the "Change Storage Location…" item).**
+
+## Environment facts
 
 - Working dir (HAS A SPACE): `/Users/abhinavademmagari/Documents/Projects/meeting recorder`
 - Python for all checks: `./spike/.venv/bin/python` (3.12.13).
   - Tests: `./spike/.venv/bin/python -m pytest tests/ -q`  ·  Lint: `./spike/.venv/bin/ruff check mr tests`
-- **`mr` is NOT on `PATH` in this checkout** and `spike/.venv/bin` has no `mr` console
-  script. The CLI is invoked as `./spike/.venv/bin/python -m mr.cli <cmd>`. The menu-bar
-  app's Process wrapper MUST therefore resolve `mr` robustly: try `shutil.which("mr")`
-  first, then a fallback (env hint + configurable). Swift side sequences candidates in order.
-- Swift 6.4 / macOS SDK 27 toolchain present. `swift build` inside the DSH sandbox needs
-  workspace-local caches: `TMPDIR`, `CLANG_MODULE_CACHE_PATH` and `--disable-sandbox`
-  (the `capture/build.sh` pattern). Verified `import AppKit` compiles with those settings.
-- System = macOS 27.0.1 (menu bar + system-audio TCC apply).
+- Swift: Xcode toolchain present. `capture/build.sh` and `menu-bar/build.sh` are sandbox-safe
+  (workspace-local caches + `--disable-sandbox`). Menu-bar tests: `swift test --disable-sandbox`
+  from `menu-bar/` (Xcode installed).
+- `mrBar` rebuild + re-sign: `cd menu-bar && ./install.sh`. Human relaunch required after.
 
 ## Paths / naming
 
-- `menu-bar/` — new SwiftPM package (sibling to `capture/`): executable target `mrBar`.
-- Python: `mr/config.py` (add `set_out_root`), `mr/cli.py` (add `config set out_root`).
-- Heartbeat: `<out_root>/.state/transcribing.json` (written by `_do_stop`, cleared on done;
-  read by the menu bar only when the dropdown opens). Max age for stale-sweep = 300 s.
-- Config: `~/.config/mr/config.toml`. State: `<out_root>/.state/recording.json`.
+- `capture/Sources/mr-capture/MicCapture.swift`, `main.swift` — remove VPIO/AEC.
+- `mr/core/capture.py`, `mr/cli.py` — remove `--aec`/`--no-aec` plumbing.
+- `menu-bar/Sources/mrBar/StatusItemController.swift`, `MenuBuilder.swift`, `MRCLI.swift`,
+  `TranscriptionState.swift` — lazy on-demand transcription status; no blocking on open.
+- `tests/test_capture.py`, `tests/test_cli_start_stop_toggle_status_doctor.py` — drop aec asserts.
+- Docs: `README.md`, `docs/architecture.md`, `docs/tasks/*`, `config.toml.example`.
 
-## Shared contracts (LOCKED — dependents assume these)
+## Shared contracts (LOCKED)
 
-**`out_root` config** — `mr.config`:
-```python
-def set_out_root(path: str, *, config_path: str | Path | None = None) -> str:
-    """Validate+absolutize `path`, atomically rewrite out_root in the TOML,
-    PRESERVING all other keys/values/types, and return the resolved string.
-    Rewrites the value as a TOML string. If the config file doesn't exist,
-    create it with the user's other defaults plus out_root. Raises ValueError
-    on an empty/non-str path."""
-```
-- Must not disturb unknown keys, comments are not required to be preserved (TOML rewrite
-  is fine as long as every existing key keeps its value; default to rebuilding the table).
-- CLI: `mr config set out_root <dir>` (typer command under a `config` group).
-  Prints the new resolved `out_root`; exit 0 on success, typer.BadParameter/exit 2 on a
-  bad path.
+**`mr-capture` CLI** (after fix): `mr-capture --out <dir>` only — the `--no-aec` flag and all
+voice-processing/ducking code are removed. The binary always records: (a) **raw mic** via an
+input-bus tap with NO voice processing and NO `mainMixer→outputNode` connection (the engine
+never starts an IO unit on the output device), (b) the system audio tap (unchanged). Writes
+`mic.wav` / `system.wav` / `meta.json`; `meta.json` keeps `"aec": false`.
 
-**Heartbeat** (`transcribing.json`) — `mr/cli.py` (+ a tiny reader, see task):
-```python
-# written at the START of transcription inside _do_stop, removed on completion/failure-clear
-# shape: {"version":1, "stamp":"<stamp>", "out_root":"<abs>", "started_at":"<ISO8601>"}
-# path: <out_root>/.state/transcribing.json
-def _heartbeat_path(out_root: str) -> Path ...            # <out_root>/.state/transcribing.json
-def write_transcribing_heartbeat(out_root: str, stamp: str, started_at: str) -> None  # atomic
-def clear_transcribing_heartbeat(out_root: str, stamp: str) -> None    # remove file when it's ours
-def read_transcribing_heartbeat(out_root: str) -> dict | None         # None if missing/malformed/version!=1
-```
-- `_do_stop`, around `_transcribe_and_write`, writes a heartbeat before transcribing and
-  clears it after (in a `finally`, and on `ModelNotCachedError` too). Keep the atomic-write
-  correctness bar (same as `mr.state._atomic_write`; reuse or duplicate a local helper).
+**Python CLI** (after fix): `mr start` / `mr toggle` no longer accept `--aec`/`--no-aec`.
+`RecordSession` drops the `aec` kwarg; `_spawn_capture`/`_do_start` drop the `aec` parameter.
+`CaptureMeta.aec` (schema) remains but always reads false — no merge/output dependency.
 
-**Swift → `mr` invocation** — the app NEVER spawns `mr-capture` itself and never writes the
-  pidfile/heartbeat. It shells out to `mr` via `Process`. Candidate commands (resolved in
-  order at runtime, first available wins):
-  1. `mr start` / `mr stop` / `mr status` / `mr config set out_root <dir>` — if `mr` on PATH.
-  2. fallback: `python -m mr.cli <cmd>` — with the python resolved from an env hint
-     (`MR_PYTHON`), defaulting to trying `python3`, then a doc-configured absolute path.
-  The wrapper is centralized in `MRCLI.swift` so only one place sequences the fallback.
+**Menu-bar** (after fix): opening the dropdown NEVER spawns a process and never blocks the
+main thread. Start/Stop enablement derives from the controller's locally-tracked
+`isLiveRecording`. The "Transcribing:" section is removed from the open menu. A new
+**"Check Active Transcriptions…"** menu item runs `mr status` (+ heartbeat) on an explicit
+click: label → "Searching…", result → shows `<stamp> — transcribing…` or `None (no active
+transcription)`, and syncs the live state. App lays-over-transient text as a second menu row.
 
 ## Epics / Tasks (execution order)
 
-### Epic MB-PY — Python backend (menu-bar dependencies; pure + fully unit-tested)
+### Epic CAP-AUDIO — Stop degrading the live call (remove capture-time VPIO/AEC)
 | id | Task | Status | Depends |
 |----|------|--------|---------|
-| MB-PY1 | `mr.config.set_out_root` atomic+validated write (preserves other keys) + tests | done | — |
-| MB-PY2 | `mr config set out_root <dir>` CLI command (+ tests) | done | MB-PY1 |
-| MB-PY3 | transcription heartbeat write/clear in `_do_stop` + reader + tests | done | — |
-| MB-PY4 | `mr config get out_root` CLI command (+ tests) — lets Swift learn the current root for folder-open/heartbeat base | done | MB-PY2 |
+| A1 | `MicCapture.swift`: remove voice-processing/ducking + `mainMixer→output` connect; `main.swift`: drop `--no-aec` parsing + `aecEnabled`; always raw mic. `meta.json` writes `aec: false`. Build with `capture/build.sh`. (**done**; build exit 0; also fixed the `[--no-aec]` hint in `capture/build.sh`) | done | — |
+| A2 | Python: drop `aec` from `RecordSession`, `_spawn_capture`, `_do_start`, `start`, `toggle`; remove `--aec/--no-aec` options; update `tests/test_capture.py` + cli tests (remove `--no-aec`/aec-default asserts, `SAMPLE_META["aec"]` stays). pytest + ruff green. (**done**; 137 tests pass, ruff clean) | done | A1 |
+| A3 | Docs: README CLI reference (remove `--aec/--no-aec`; rewrite Echo-handling + Permissions to state recording is invisible to the call, echo via dedup), `docs/architecture.md` design decision, operational docs (`docs/simulated-test-production.md`, `examples/manual/README.md`). Historical spike/plan/task briefs left untouched. (**done**; zero `--aec` refs in current docs) | done | A2 |
 
-### Epic MB-SW — Swift menu-bar app ("mrBar")
+### Epic MB-DISPLAY — Dropdown always opens + on-demand transcription status
 | id | Task | Status | Depends |
 |----|------|--------|---------|
-| MB-SW1 | `menu-bar/` SwiftPM package scaffold, `mrBar` executable target, `AppInfo.swift` (resolve `mr`/python candidates), `build.sh`, `.gitignore` update | done | — |
-| MB-SW2 | `MRCLI.swift` Process wrappers (start/stop/status/config-set) + `TranscriptionState.swift` heartbeat reader (lazy, max-age sweep 300 s) | done | MB-SW1 |
-| MB-SW3 | `StatusItemController.swift` + `MenuBuilder.swift` + `main.swift`: NSStatusItem idle/live icon, dropdown menu, lazy refresh on open | done | MB-SW2 |
-| MB-SW4 | `StorageLocation.swift` (NSOpenPanel → `mr config set out_root`), Open Transcripts/Recordings folders, Info.plist (LSUIElement + mic/audio usage), entitlements, `install.sh` | done | MB-SW3 |
-| MB-SW5 | Compile whole package (sandbox-safe build), headless smoke of pure logic, `docs` manual-test doc (mirror `docs/simulated-test-production.md`), README note | done | MB-SW4 |
-| MB-SW7 | **Fix:** an icon click must only open the dropdown, NOT start recording. macOS activates the first highlighted menu item on click-through → insert an inert (disabled) status header as the first row so the click can't hit `Start Recording` (`MenuBuilder.swift` only) | done | MB-SW3 |
-| MB-SW8 | **Fix:** changing storage location re-opens the folder picker after the confirmation (re-entrant `refresh()` rebuilds the menu in the action handler → click-through re-fires `Change Storage Location…`; also `NSOpenPanel` not `orderOut` before the modal alert, per `NSSavePanel` API). Remove sync `refresh()` from `changeRoot` + `orderOut` panel before the alert (`StatusItemController.swift` only) | done | MB-SW4 |
-| MB-SW9 | **Fix `mr start failed` in the app while the CLI works:** `DEFAULT_CAPTURE_BIN` is a CWD-relative path (`capture/.build/release/mr-capture`); the `.app` launches from a non-repo CWD so the helper can't resolve → `assert_capture_bin` FileNotFoundError → empty stdout → "mr start failed.". Make the default absolute, anchored to the repo root via `__file__` (`mr/core/capture.py`) | done | — |
-| MB-SW10 | **Fix v2 of icon-click auto-starting recording (MB-SW7 didn't hold):** the single click opens the menu and macOS auto-activates the first **ENABLED** item under the click — it *skips* disabled rows, so the MB-SW7 disabled header (row 1) fell through to `Start Recording`. Fix: make the first row an **enabled no-op** status header (action = `statusHeaderClicked` no-op) so the auto-activation hits that instead. `MenuBuilder.swift` + `StatusItemController.swift` | done (did NOT hold — see MB-SW11) | MB-SW7 |
-| MB-SW11 | **Structural fix v3 of icon-click auto-starting recording:** user confirms MB-SW7/MB-SW10 did not hold — a single icon click still starts a recording. Both prior fixes only changed *which* row absorbs the opening click's auto-activation; they didn't remove the auto-activation itself. Root cause: `statusItem.menu = menuBuilder.menu` makes AppKit treat the opening click as a click-through into the menu (opens + can fire an item in one gesture). Fix: stop assigning `statusItem.menu`; set `statusItem.button.action`/`.target` to a click handler that calls `refresh()` then shows the menu explicitly via `NSMenu.popUp(positioning:at:in:)`, so opening the dropdown and clicking an item inside it become two distinct, separate clicks. Revert the row-1 no-op-header workaround back to a plain disabled status label (no longer needed once auto-activation is structurally impossible). `MenuBuilder.swift` + `StatusItemController.swift` | done (pending human click-test — AppKit event behavior can't be verified in sandbox) | MB-SW10 |
-| MB-PY5 | **Fix: `mr status` reports `recording: yes` whenever a stale pidfile exists (even if the capture process is dead), so the menu-bar icon stays red / status is stuck.** Root cause: `status()` in `mr/cli.py` decides yes/no purely on pidfile existence; the `is_stale()` PID-liveness probe only prints a warning line on stderr and never flips the answer. Stop also only clears state after a successful transcribe, so an interrupted/failed `stop` (or crashed capture) leaves state that `status` still calls "recording: yes". Fix: `status` reports `recording: yes` ONLY when the state PID is alive; a stale pidfile reports `recording: no` while noting the stale pidfile. Matches documented intent in `docs/menu-bar-manual-test.md` line 209 ("stale-pidfile reads as idle, not stuck-red"). `mr/cli.py` + tests | done | — |
-| MB-PY6 | **Fix: `mr stop` crashes with a `LibsndfileError` traceback when the recording files are gone (deleted / crash before flush), instead of clearing the pid.** In `_do_stop`, `_transcribe_and_write` → `sf.read(...)` raises an uncaught `soundfile.LibsndfileError` when `mic.wav`/`system.wav` are missing, so the pidfile is never cleared and every `mr stop` errored. Fix: after the signal/flush wait block, guard transcription on recording presence — if the recording dir is gone or the WAVs are not all present, clear the pidfile and finish cleanly with a "nothing to transcribe" message (no traceback). `mr/cli.py` (`_do_stop`) + tests | done | MB-PY5 |
+| D1 | `StatusItemController.refresh()`: stop calling `mr status` / heartbeat on open (no main-thread spawn, no block). Start/Stop enablement from local `isLiveRecording`; cache `cliAvailable` once at init. Remove the always-rendered "Transcribing:" section from `MenuBuilder.rebuild` (now `rebuild(status:isCLIAvailable:)`). (**done**; build exit 0, no subprocess on open path) | done | — |
+| D2 | Add **"Check Active Transcriptions…"** item: on click set row label to "Searching…", run `MRCLI.status()` + `TranscriptionState.activeHeartbeat()` off the main thread, then update the row to `<stamp> — transcribing…` or `None (no active transcription)`; opportunistically sync `isLiveRecording` from the result. Uses `MRCLI` (no new subprocess logic beyond the existing runner). (**done**; build exit 0, all CLI work off main thread) | done | D1 |
+| D3 | XCTest updates + new tests for the lazy item runner and the non-blocking `refresh` (pure-logic, fake runner); `swift test --disable-sandbox` green from `menu-bar/`; `menu-bar/install.sh` rebuilds + re-signs the `.app`. (**done**; 21 tests pass = 18 + 3 new MenuBuilderTests) | done | D2 |
 
-## Per-epic acceptance (commands the CTO agent runs to verify)
+## Per-epic acceptance (CTO runs to verify)
 
-- **MB-PY**: `./spike/.venv/bin/python -m pytest tests/ -q` (existing 106 + new all pass);
-  `./spike/.venv/bin/ruff check mr tests` clean.
-- **MB-SW**: `cd menu-bar && ./build.sh` produces a runnable binary (or at minimum a clean
-  `swift build -c release` with the sandbox-safe env); manual-test doc written. The GUI
-  event-loop behaviour (status item renders, perms) is HUMAN-verified per the manual-test doc;
-  the CTO agent verifies compilation + pure-logic smoke only.
+- **CAP-AUDIO**: `cd capture && ./build.sh` exits 0 (no `--no-aec`/VPIO refs in source);
+  `./spike/.venv/bin/python -m pytest tests/ -q` green; `./spike/.venv/bin/ruff check mr tests`
+  clean. Diff read in full: no `setVoiceProcessingEnabled`, no `voiceProcessingOtherAudioDucking`,
+  no `mainMixer`→`output` connect, no `--no-aec` anywhere.
+- **MB-DISPLAY**: `cd menu-bar && swift test --disable-sandbox` green; `cd menu-bar && ./install.sh`
+  rebuilds `.app`; new "Check Active Transcriptions…" item present in `MenuBuilder`. **HUMAN verify:**
+  relaunch `menu-bar/.build/Release/mrBar.app`, start recording from the icon, then click the icon
+  again — the dropdown MUST open while recording; "Check Active Transcriptions…" shows
+  "Searching…" then the active stamp (or None); stop via the dropdown works.
 
 ## Progress log
 
-- **(this session) MB-PY6 — DONE (commit 32f8dd6): `mr stop` no longer crashes when the recording files are gone.** User deleted the `2026-10-12_2038` WAVs; the leftover pidfile made every `mr stop` raise an uncaught `soundfile.LibsndfileError` in `_transcribe_and_write`. Fixed by adding a guard in `_do_stop` (after the flush-wait block): if the recording dir is gone or either `mic.wav`/`system.wav` is missing, `clear_state` + `echo "recorded files missing ...; cleared stale recording state"` + return (no heartbeat, no transcribe, exit 0). `ModelNotCachedError` exit-3 retry semantics (state kept when files present) preserved. Verified independently: diff read, 25 targeted + 137 full pytest, ruff clean; ran `mr stop` against the user's real stale state → printed the clean message, exit 0, no traceback. **HUMAN step:** the pidfile at `~/Documents/Meetings mr/.state/recording.json` points at a now-missing recording dir; the CTO sandbox cannot write it (`Operation not permitted`), so run `mr stop` once in your own terminal (no sandbox) — it will clear cleanly. (MB-PY5's `mr status` change is also committed — 689bc5d.)
-- **(this session) MB-PY5 — DONE (commit 689bc5d): `mr status` honours PID liveness.** Root cause: `status()` answered `recording: yes` purely on pidfile existence; `is_stale()` only printed a stderr warning. Fix: `recording = not is_stale(state)` — a stale pidfile now prints `recording: no` (keeps pid/out_dir/stamp/started_at, stale note on stderr), a live PID prints `recording: yes`. The Swift `MRStatus.parse` only keys on `stdout` `recording: yes`, so the menu-bar icon now reads idle for a stale pidfile with no Swift change. Verified independently (not worker's word): `git diff` read in full, matches brief; 136 pytest pass, ruff clean; real-world smoke confirmed the user's actual leftover pidfile (`~/Documents/Meetings mr/.state/recording.json`, stamp `2026-10-12_2038`, pid 58645, process dead) now reports `recording: no` + `stale pidfile; run \`mr stop\` to clear`. **HUMAN step:** run `mr stop` once to clear the stale state file; relaunch `mrBar` if it's running — the icon should now read idle (grayscale) instead of stuck-red.
-- **(new session) MB-SW11 — DONE (code), structural fix, pending human click-test:** user reported MB-SW10 did not hold (icon click still auto-started a recording). Root cause confirmed: `statusItem.menu = menuBuilder.menu` lets AppKit treat the opening click as a click-through onto a menu item — MB-SW7/MB-SW10 only changed which row absorbed that, never removed the mechanism. Fix: removed the `.menu` assignment; `statusItem.button` now has its own `target`/`action` → new `togglePressed(_:)` which calls `refresh()` then `menuBuilder.menu.popUp(positioning:at:in:)` explicitly, so opening the menu and clicking an item inside it are two separate, distinct clicks (structurally cannot auto-activate). Removed the now-unused `NSMenuDelegate` conformance, `menuWillOpen`, and the `statusHeaderClicked` no-op; reverted row 1 to a plain disabled status label. Verified independently (not just worker's word): `git diff` read in full, matches brief; `swift build -c release --disable-sandbox` exit 0; `swift test --disable-sandbox` 18/18 green; `.app` bundle rebuilt + re-signed via `install.sh`. **HUMAN step (required — this is live AppKit click-timing behavior no sandboxed agent can observe):** quit any running `mrBar`, relaunch the freshly rebuilt `menu-bar/.build/Release/mrBar.app`, and confirm a single icon click ONLY opens the dropdown with no recording started; then confirm clicking "Start Recording" inside the open menu still works and turns the icon red.
-- **(prior session) MB-SW10 — DONE (code, commit pending):** first menu row now an ENABLED no-op status header (`statusHeaderClicked`) so a single icon click's auto-activation hits that instead of `Start Recording`. `swift build -c release` clean; `swift test` 18/18 green; `.app` regenerated. **HUMAN step:** relaunch `menu-bar/.build/Release/mrBar.app` and confirm a single icon click only opens the dropdown (no recording). If it STILL auto-records, the mechanism is not "first enabled item" — escalate to the structural fix: decouple the click from the menu via `statusItem.button.action` + `NSMenu.popUp(positioning:at:in:)` (do NOT assign `statusItem.menu`), which structurally cannot auto-activate.
-- **(this session) MB-SW9 — DONE (root cause fixed, commit pending):** `DEFAULT_CAPTURE_BIN` now absolute (repo-root-anchored via `Path(__file__)`). pytest 135 passed, ruff clean, and `assert_capture_bin()` returns the absolute helper path from `/tmp` too. **HUMAN step:** relaunch the app and Start Recording — the helper now resolves from any CWD. (The initial "mr start failed." remains as a UI text but should not occur; a follow-on polish MB-SW10 would surface real CLI stderr in the dialog.)
-- **(this session) MB-SW9 (in progress) — `mr start failed` in the app but works from CLI:** Confirmed root cause. The user ran `python -m mr.cli start` from the repo root → **succeeds** ("recording started … mic: MacBook Pro Microphone @ 48000 … aec=true"). From the menu-bar `.app` it fails with empty stdout. Cause: `DEFAULT_CAPTURE_BIN = "capture/.build/release/mr-capture"` is **CWD-relative**; the `.app` launches from a non-repo working dir, so `assert_capture_bin()` raises `FileNotFoundError` → typer exit 1, traceback to stderr (swallowed by the app) → "mr start failed.". Fix MB-SW9: anchor the default to the repo root via `Path(__file__)` in `mr/core/capture.py`.
-- **(this session) MB-SW8 — DONE (code, pending user re-test):** added `panel.orderOut(nil)` before `changeRoot` + removed the re-entrant `refresh()` from `changeRoot`. `swift build -c release` clean; `swift test` 18/18 green; `.app` regenerated via `install.sh`. **HUMAN step:** relaunch `menu-bar/.build/Release/mrBar.app` (with `MR_PYTHON` set or `mr` on PATH); change storage location → confirm single confirmation, no re-opened picker; then Start Recording to confirm `mr start failed` is gone (this was a knock-on of the double-picker).
-- **(this session) MB-SW8 (in progress) — storage-location double-picker + follow-on `mr start failed`:** User: "After selecting the new folder I got the confirmation that it changed but the select folder popped up again" then "mr start failed". Diagnosis: `changeRoot` calls `refresh()` inside the menu-action handler — `refresh()` → `menuBuilder.rebuild()` → `menu.removeAllItems()`+re-add → macOS click-through re-fires the same-position `Change Storage Location…` item → picker re-opens. Also `NSOpenPanel` isn't `orderOut` before the modal `NSAlert` (AppKit `NSSavePanel` API: must `orderOut` before showing an alert from the completion handler). Fix scope MB-SW8. The `mr start failed` is a knock-on: the double/re-entrant change can leave `out_root` momentarily wrong; `mr start` itself verified working on the real Mac. CTO sandbox blocks writes to `~/Documents/Meetings mr`, so the CTO cannot validate `mr start` against a real path — needs a user re-test after MB-SW8.
-- **(this session) MB-SW7 bug fix — DONE (commit 8df4368):** inert first menu row. `swift build -c release` clean; `swift test` 18/18 green; `.app` bundle regenerated via `install.sh`. User must relaunch the rebuilt app to confirm the icon click no longer starts a recording.
-- **(this session) MB-SW7 bug fix:** User report — "as soon as I click on the icon a meeting recording starts … it should just open the dropdown." Confirmed via user: the dropdown opens AND the click lands on the first auto-highlighted item, activating it. First item is `Start Recording` → single icon click starts recording. Fix: inert (disabled, non-actionable) status header becomes the topmost row so the click-through hits nothing. Brief `docs/tasks/MB-SW7_fix_first_item.md`.
-- **(this session) Started Epic MB (menu-bar app).** Backlog refreshed from `MB_1_menubar_app.md`; plan + decomposition below.
-  - **Post-Epic MB-SW6 (d7e344b):** Start/Stop now show an error dialog on any `mr` CLI failure instead of silently closing the menu. Confirmed via user test that `mr start` itself works on the real Mac (creates `~/Meetings/recordings/<stamp>`, records from mic). The earlier `FileNotFoundError` on `~/Meetings` was an artifact of the CTO's DSH sandbox (blocks `~/Meetings` writes), NOT a real `mr` bug. Remaining real issue: verifying the GUI action context — the `.app` must be launched with `MR_PYTHON=/Users/abhinavademmagari/Documents/Projects/meeting recorder/spike/.venv/bin/python` (or `mr` on PATH) or the CLI lookup fails `.mrUnavailable`. **HUMAN step now:** relaunch the freshly built `menu-bar/.build/Release/mrBar.app` with `MR_PYTHON` set and Start Recording — the icon should turn red and (on any failure) an alert explains why.
-  - MB-PY1/2/3 done (config set_out_root, `mr config set out_root`, heartbeat). 133 Python tests pass, ruff clean.
-  - MB-SW1 done (package scaffold + AppInfo). MB-SW2 done (MRCLI + TranscriptionState + XCTest target).
-  - **`swift test` now GREEN (Xcode installed):** 17/17 tests pass via `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`. `build.sh` auto-selects the Xcode toolchain. One test bug fixed (TrailingZ fixture now emits a genuine UTC `Z`).
-  - **Environment note:** this host has only Xcode CommandLineTools (no Xcode.app), so `swift test` cannot run here (`XCTest` not found). Verification of Swift logic uses a Foundation-only runtime self-check harness (16 checks) + compile of the release binary. User chose to **install Xcode**; once installed, run `swift test` on `menu-bar/` for the real unit tests.
-  - **Cross-language fix (behind MB-SW2):** Python heartbeats now write a UTC-aware `Z`-suffixed `started_at` (was naive local) so Swift `ISO8601DateFormatter` parses it; Swift reader has a naive-local fallback. Verified end-to-end.
-- Prior history (Phase 1 + P2): see git log; all engineering done.
-
-## Open decisions (from `MB_1_menubar_app.md`, defaults adopted — see that file for the full decision log)
-
-1. Async stop → icon flips idle immediately; "Transcribing" section in the dropdown. **B1 heartbeat file.**
-2. Lazy refresh — icon/list computed only on dropdown open; no background timer.
-3. `mr` lookup — resolve candidates in order; explicit error menu item when none found.
-4. Non-sandboxed → use `NSOpenPanel` and spawn CLI from the app (TCC attributes permissions to the app).
-5. Store location edits the shared `~/.config/mr/config.toml` via `mr config set out_root`.
-6. Heartbeat path `<out_root>/.state/transcribing.json`; `max_age` = 300 s.
+- **(this session) D2+D3 — DONE (verified, no commit yet):** "Check Active Transcriptions…" item added to `MenuBuilder` (tag 707); `StatusItemController.checkActiveTranscriptions` runs `mr status` + heartbeat off the main thread, shows "Searching…" then `<stamp> — transcribing…` or `None (no active transcription)`, and syncs live state. Display logic extracted to `MenuBuilder.transcriptionResultText(stamp:)` (D3) with 3 unit tests → `swift test` 21/21 green. My own `git diff` read + test run confirmed.
+- **(this session) D1 — DONE (verified, no commit yet):** open path is now non-blocking.
+- **(this session) A3 — DONE (verified, no commit yet):** current docs updated.
+- **(this session) A2 — DONE (verified, no commit yet):** Python aec plumbing removed.
+- **(this session) A1 — DONE (verified, no commit yet):** raw-mic capture. `MicCapture.start()` no longer enables VPIO, no `mainMixer→outputNode` connect; `main.swift` drops `--no-aec`, `meta.json` writes `aec: false`. `capture/build.sh` exit 0; only `aec` match is the meta key (worker's grep + my own `git diff` read + build re-run confirmed). Also fixed the stale `[--no-aec]` hint line in `capture/build.sh`. Commit pending epic end.
+- **(this session) Investigated both reported bugs; decisions locked.** Bug1: VPIO/AEC
+  degrades the live call — user chose "record raw mic, stop VPIO entirely". Bug2: dropdown
+  blocked by synchronous `mr status` on open — user chose lazy on-demand "Check Active
+  Transcriptions…". Backlog restructured with epics CAP-AUDIO (A1–A3) and MB-DISPLAY (D1–D3).

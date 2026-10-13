@@ -13,6 +13,9 @@ build/
 
 # Swift / capture
 capture/.build/
+capture/.tmp/
+capture/.modcache/
+capture/.swiftpm-cache/
 spike/capture/.build/
 
 # Swift / menu-bar

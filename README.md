@@ -12,8 +12,9 @@ Everything (recording, transcription, output) stays on your Mac.
 
 1. `mr toggle` (or `mr start`) spawns a small Swift helper, `mr-capture`,
    which records two 16 kHz mono streams at the same time:
-   - **mic** — your microphone (via the voice-processing I/O path, with
-     automatic echo cancellation) → attributed **You**
+   - **mic** — your microphone, recorded **raw** (no voice processing) so
+     recording never lowers call volume or ducks the remote participant →
+     attributed **You**
    - **system** — your speakers, tapped through a Core Audio process tap
      (macOS 14.2+) → attributed **Them**
    The helper writes `mic.wav` and `system.wav` into a per-session folder.
@@ -93,17 +94,15 @@ The entry point is `mr` (installed by `pip install -e .`).
 ### `mr toggle`
 
 ```
-mr toggle [--aec | --no-aec] [--json]
+mr toggle [--json]
 ```
 
-- `--aec` / `--no-aec` — enable/disable echo cancellation when *starting*
-  (default: enabled).
 - `--json` — also write a JSON sidecar when *stopping*.
 
 ### `mr start`
 
 ```
-mr start [--aec | --no-aec]
+mr start
 ```
 
 Spawns `mr-capture` (it keeps running after `mr start` exits) and records the
@@ -274,9 +273,9 @@ for how to verify your capture actually has audio.
 - **Model**: `mlx-community/whisper-large-v3-turbo` (fast on Apple Silicon).
 - **Both tracks are transcribed sequentially** (mic, then system); expect it to
   scale with call length.
-- **Echo handling**: AEC at capture time does the heavy lifting; the merge
-  step's text-overlap dedup (rapidfuzz token similarity ≥ `dedup_threshold`)
-  catches anything AEC couldn't cancel.
+- **Echo handling**: there is **no capture-time AEC** — the live call is
+  untouched — so the merge step's text-overlap dedup (rapidfuzz token
+  similarity ≥ `dedup_threshold`) is what removes echo.
 - **Attribution is deterministic** (stream origin), not speaker-ID.
 
 ## Project layout

@@ -12,7 +12,7 @@ older spike-binary + in-process driver approach in
 
 End-to-end production flow with a controllable scripted conversation:
 
-1. **`mr toggle` start** — spawns the `mr-capture` helper (mic + system-audio tap, AEC).
+1. **`mr toggle` start** — spawns the `mr-capture` helper (raw mic + system-audio tap).
 2. **`mr toggle` stop** — stops capture, runs the real local `mlx-whisper`
    transcription (offline, cache-only), merges the two tracks with echo dedup.
 3. **Attributed transcript** — writes `~/Meetings/transcripts/<stamp>.md` with You/Them
@@ -79,11 +79,11 @@ ls spike/out/manual/them_1.wav && echo "assets present" \
 **Terminal 1 — start recording:**
 
 ```sh
-./spike/.venv/bin/python -m mr.cli toggle --no-aec
+./spike/.venv/bin/python -m mr.cli toggle
 ```
 
-(Use the default `--aec` if you want to exercise Apple's AEC instead; `--no-aec`
-exercises the software echo-dedup path, which is the case under test here.)
+(There is no capture-time AEC: `toggle` records the raw mic + system tap, and the
+merge-time text-overlap dedup is the echo handling — the case under test here.)
 
 **Terminal 2 — timed Them playback (same moment, or right after):**
 

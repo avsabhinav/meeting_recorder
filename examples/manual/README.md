@@ -18,7 +18,7 @@ Short reference for the manual test scripts in this directory.
 ## Recommended production record flow (summary)
 
 1. `bash examples/manual/prep_clips.sh` (if assets missing)
-2. `./spike/.venv/bin/python -m mr.cli toggle --no-aec` (start recording — human, in Terminal)
+2. `./spike/.venv/bin/python -m mr.cli toggle` (start recording — human, in Terminal)
 3. Second terminal: `bash examples/manual/play_timed.sh`, speaking the "You" lines at the prompts
 4. `./spike/.venv/bin/python -m mr.cli toggle` (stop → transcribes → writes the `.md`)
 5. `./spike/.venv/bin/python -m mr.cli status` (confirms no active recording)
