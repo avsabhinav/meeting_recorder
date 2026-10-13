@@ -5,8 +5,8 @@ import AppKit
 /// - Icon: `mic.fill` template image — grayscale when idle, tinted
 ///   `systemRed` while live (no custom assets; SF symbols only).
 /// - Refresh is **lazy**: the button-click handler (`togglePressed`) rebuilds
-///   the menu and icon from `mr status` + the transcription heartbeat. No
-///   timers/polling.
+///   the menu and icon from the locally-tracked live state — no subprocess on
+///   the open path, no timers/polling.
 /// - Start is a quick synchronous CLI call; Stop is dispatched to a background
 ///   queue (it blocks 1–3 min transcribing) and the icon flips to idle
 ///   **immediately**, per the brief.
@@ -20,8 +20,8 @@ final class StatusItemController: NSObject {
     /// Base for the transcription heartbeat: the current resolved `out_root`
     /// from `mr config get out_root` (MB-SW4), falling back to `~/Meetings`
     /// (the `mr` default) when the CLI is unavailable or errors. Computed
-    /// (not stored) so every `refresh()` — i.e. every menu open — re-queries
-    /// the CLI, and a storage-location change is picked up on the next open.
+    /// (not stored) so a storage-location change is picked up on the next use
+    /// (the "Check Active Transcriptions…" item in MB-DISPLAY/D2).
     private var transcriptionBase: URL {
         if let root = StorageLocation.currentRoot() {
             return URL(fileURLWithPath: root)
@@ -31,9 +31,17 @@ final class StatusItemController: NSObject {
 
     private var isLiveRecording = false
 
+    /// Whether `mr` can be resolved (fixed at launch; resolving once avoids a
+    /// `which mr` subprocess on every menu open).
+    private let cliAvailable: Bool
+
     override init() {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.menuBuilder = MenuBuilder()
+        // Resolving `mr` here (before super.init — required for stored lets)
+        // is the app's single `which mr` spawn: the app's environment is fixed
+        // at launch, so the result never needs re-resolving.
+        self.cliAvailable = AppInfo.resolveMrInvocation() != nil
         super.init()
         self.menuBuilder.target = self
 
@@ -58,32 +66,18 @@ final class StatusItemController: NSObject {
 
     // MARK: - Lazy refresh (main thread)
 
-    /// Rebuilds icon + menu from current state. Called on menu open (and after
-    /// start/stop) — never on a timer. `mr status` is one cheap process spawn,
-    /// acceptable here per the brief's lazy model.
+    /// Rebuilds icon + menu from locally-tracked live state. Called on menu
+    /// open (and after start/stop) — never on a timer, and never with a
+    /// subprocess (see the comment inside).
     func refresh() {
-        let cliAvailable = AppInfo.resolveMrInvocation() != nil
-
-        var recording = false
-        if cliAvailable {
-            let cli = MRCLI()
-            do {
-                let (out, _) = try cli.status()
-                recording = MRStatus.parse(out).recording
-            } catch {
-                // e.g. processTimeout: show idle rather than a bogus live icon.
-                recording = false
-            }
-        }
-
-        // Heartbeat reader returns a single active entry (or nil if stale).
-        let transcribing = TranscriptionState(baseURL: transcriptionBase)
-            .activeHeartbeat()
-            .map { [$0] } ?? []
-
-        setLive(recording)
-        let status = MRStatus(recording: recording, pid: nil, stamp: nil, startedAt: nil)
-        menuBuilder.rebuild(status: status, isCLIAvailable: cliAvailable, transcribing: transcribing)
+        // No subprocess on the open path: running `mr status` / `which mr` here on
+        // the main thread blocked the status-bar tracking event and made the
+        // dropdown fail to open while recording. Live state is tracked locally by
+        // start/stop; the explicit "Check Active Transcriptions…" item queries the
+        // CLI on demand.
+        setLive(isLiveRecording)
+        let status = MRStatus(recording: isLiveRecording, pid: nil, stamp: nil, startedAt: nil)
+        menuBuilder.rebuild(status: status, isCLIAvailable: cliAvailable)
         statusItem.button?.needsDisplay = true
     }
 
@@ -183,6 +177,33 @@ final class StatusItemController: NSObject {
                     alert.informativeText = failure.detail
                     alert.runModal()
                 }
+                self.statusItem.button?.needsDisplay = true
+            }
+        }
+    }
+
+    /// "Check Active Transcriptions…" → on-demand, OFF the main thread. Flips the
+    /// item label to "Searching…", queries `mr status` + the heartbeat, then
+    /// updates the row to the active stamp (or "None") and syncs live state.
+    @objc func checkActiveTranscriptions(_ sender: Any?) {
+        let tag = MenuBuilder.checkTranscriptionsTag
+        menuBuilder.menu.item(withTag: tag)?.title = "Searching…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            var recording = false
+            let cli = MRCLI()
+            if let (out, exit) = try? cli.status(), exit == 0 {
+                recording = MRStatus.parse(out).recording
+            }
+            // Report the in-flight transcription (fresh heartbeat) if any; else "None".
+            let base = self.transcriptionBase
+            let stamp = TranscriptionState(baseURL: base).activeHeartbeat()?.stamp
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isLiveRecording = recording
+                self.setLive(recording)
+                let final = MenuBuilder.transcriptionResultText(stamp: stamp)
+                self.menuBuilder.menu.item(withTag: tag)?.title = final
                 self.statusItem.button?.needsDisplay = true
             }
         }

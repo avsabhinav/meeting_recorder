@@ -6,6 +6,16 @@ import AppKit
 /// gathers the state and calls `rebuild`. All items target the controller via
 /// target/action; disabled rows have no action at all.
 final class MenuBuilder {
+    /// Tag for the "Check Active Transcriptions…" item (MB-DISPLAY/D2) so the
+    /// controller can retitle it in place without rebuilding the menu.
+    static let checkTranscriptionsTag = 707
+
+    /// Display text for the "Check Active Transcriptions…" result (MB-DISPLAY/D3).
+    /// `nil` (no in-flight transcription) -> "None"; a stamp -> "<stamp> — transcribing…".
+    static func transcriptionResultText(stamp: String?) -> String {
+        stamp.map { "\($0) — transcribing…" } ?? "None (no active transcription)"
+    }
+
     /// The retained menu. Popped up on button click via `NSMenu.popUp` (kept
     /// alive by the controller's strong reference).
     let menu = NSMenu()
@@ -24,12 +34,11 @@ final class MenuBuilder {
 
     /// Rebuilds `menu` in place for one menu-open.
     ///
-    /// - `status`: parsed `mr status` (or the all-nil idle default when the CLI
-    ///   is unavailable / errored).
-    /// - `isCLIAvailable`: `AppInfo.resolveMrInvocation() != nil`.
-    /// - `transcribing`: active transcription heartbeats (usually 0 or 1 — the
-    ///   heartbeat file holds a single entry; the reader returns nil for stale).
-    func rebuild(status: MRStatus, isCLIAvailable: Bool, transcribing: [TranscriptionState.Heartbeat]) {
+    /// - `status`: the locally-tracked live state (the all-nil idle default
+    ///   when not recording).
+    /// - `isCLIAvailable`: `AppInfo.resolveMrInvocation() != nil` (resolved
+    ///   once at app launch).
+    func rebuild(status: MRStatus, isCLIAvailable: Bool) {
         menu.removeAllItems()
 
         // Row 1: inert status label (no action, disabled).
@@ -59,13 +68,19 @@ final class MenuBuilder {
             menu.addItem(disabledItem("mr CLI not found (set MR_PYTHON)"))
         }
 
-        // "Transcribing:" section — present only while a heartbeat is active.
-        if !transcribing.isEmpty {
-            menu.addItem(disabledItem("Transcribing:"))
-            for heartbeat in transcribing {
-                menu.addItem(disabledItem("\(heartbeat.stamp) — transcribing…"))
-            }
-        }
+        // On-demand transcription status (MB-DISPLAY/D2): the user explicitly
+        // asks for it; the controller does the CLI/heartbeat work off the main
+        // thread.
+        menu.addItem(.separator())
+        let checkTranscriptions = NSMenuItem(
+            title: "Check Active Transcriptions…",
+            action: #selector(StatusItemController.checkActiveTranscriptions(_:)),
+            keyEquivalent: ""
+        )
+        checkTranscriptions.tag = Self.checkTranscriptionsTag
+        checkTranscriptions.target = target
+        checkTranscriptions.isEnabled = isCLIAvailable
+        menu.addItem(checkTranscriptions)
 
         // Storage location + folder access (MB-SW4): real actions. Both need
         // the CLI (the app never reads/writes config itself), so they are
