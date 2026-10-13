@@ -202,6 +202,16 @@ def _do_stop(cfg: Config, json_sidecar: bool) -> None:
         ):
             time.sleep(0.25)
 
+    out_path = Path(state.out_dir)
+    if not out_path.is_dir() or not all(
+        (out_path / name).is_file() for name in ("mic.wav", "system.wav")
+    ):
+        # Recorded files are gone (deleted, or a crash before they flushed):
+        # nothing to transcribe — clear the stale pid and finish cleanly.
+        clear_state(cfg.out_root)
+        typer.echo(f"recorded files missing for {state.stamp}; cleared stale recording state")
+        return
+
     # Heartbeat: visible to the menu-bar app while transcribing; cleared in
     # ``finally`` so both success and the ModelNotCachedError path (exit 3)
     # remove it. The timestamp is UTC-aware with a trailing ``Z`` so the

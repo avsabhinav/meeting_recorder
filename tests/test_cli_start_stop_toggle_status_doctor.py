@@ -174,6 +174,30 @@ def test_stop_happy(cfg, tmp_path, monkeypatch) -> None:
     assert (Path(state.out_dir) / "mic.wav").exists()
 
 
+def test_stop_missing_files_clears_state_without_transcribing(cfg, tmp_path, monkeypatch) -> None:
+    # out_dir exists as a directory but holds NO mic.wav/system.wav.
+    out_dir = Path(cfg.out_root) / "recordings" / "s2"
+    out_dir.mkdir(parents=True)
+    state = RecordingState(1, 5566, str(out_dir), "s2", "2026-01-01T00:00:00")
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli, "is_stale", lambda state: True)  # skip flush-wait
+    transcribed: list[object] = []
+    monkeypatch.setattr(
+        mr.cli, "_transcribe_and_write", lambda *a, **k: transcribed.append(a) or Path("/never")
+    )
+    cleared: list[str] = []
+    monkeypatch.setattr(mr.cli, "clear_state", lambda out_root: cleared.append(out_root))
+    notified: list[tuple[object, object]] = []
+    monkeypatch.setattr(mr.cli, "notify_complete", lambda stamp, md: notified.append((stamp, md)))
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 0, result.output
+    assert "Traceback" not in result.output
+    assert "missing" in result.output
+    assert cleared == [cfg.out_root]
+    assert transcribed == []  # transcription never attempted
+    assert notified == []  # no completion notification
+
+
 def test_stop_model_not_cached_keeps_state(cfg, tmp_path, monkeypatch) -> None:
     state = _make_active_state(cfg, tmp_path)
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
