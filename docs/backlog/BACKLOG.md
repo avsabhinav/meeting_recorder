@@ -157,6 +157,15 @@ transcription)`, and syncs the live state. App lays-over-transient text as a sec
   again — the dropdown MUST open while recording; "Check Active Transcriptions…" shows
   "Searching…" then the active stamp (or None); stop via the dropdown works.
 
+## Epic ECHO — delayed "You" echoes of the speakers survive in the transcript (no new deps)
+User reported the transcript shows the user "repeating everything" that played on the speakers. Investigation (real sample `/Users/abhinavademmagari/Documents/Meetings mr/recordings/2026-10-13_1334`): the mic legitimately contains a QUIETER copy of the system audio (acoustic echo). The echoed "You" segments textually match a "Them" segment but TRAIL it by ~8.3–9.4 s (the mic↔system stream offset from `meta.json`, ≈ +9.34 s) — so the existing merge-time time-OVERLAP dedup never fires and the echo survives. `noisereduce` reference-mode was tested and REJECTED (removes ~16 dB of the user's own voice in voice-only windows). Decisions: (1) no new dependencies; (2) implementation = **delay-aware dedup** — drop a "You" segment that matches a "Them" segment AND follows it within the mic↔system offset window. User will validate by transcribing the sample: "if the transcript comes clean then it's acceptable."
+| id | Task | Status | Depends |
+|----|------|--------|---------|
+| D1 | `mr/core/merge.py`: add `echo_lag_s` param to `merge_transcripts`/`_is_echo` (delay-aware drop, keep overlap rule); `mr/cli.py` reads `system_vs_mic` offset from `meta.json` and passes it; tests. (**evidence: real clip → only genuine You survives**) | done | — |
+| D2 | Transcribe the sample end-to-end with the fixed pipeline; confirm echoed "You" gone while user's words remain; user acceptance. | done | D1 |
+
+- **ECHO acceptance (D1):** pytest + ruff green; real-data merge keeps only the genuine "testing" You. **ECHO acceptance (D2):** `mr`-transcribed sample `.md` shows the echoed system text attributed to **Them** (or absent), NOT to "You"; user's own words remain attributed to "You". **HUMAN verify** on the sample folder.
+
 ## Progress log
 
 - **(this session) MB-OPEN + MB-BG — DONE (verified; commit pending).**

@@ -121,3 +121,44 @@ def test_you_echo_dropped_even_if_them_starts_later() -> None:
     them = [seg("Them", "we should ship on friday", 1.0, 3.0)]
     out = merge_transcripts(you, them)
     assert out == them
+
+
+def test_delayed_you_echo_dropped_when_follows_them_within_lag() -> None:
+    you = [seg("You", "Washington DC come watch", 12.0, 18.0)]
+    them = [seg("Them", "Washington DC come watch", 3.0, 9.0)]
+    out = merge_transcripts(you, them, echo_lag_s=9.0)
+    assert out == them  # only the Them segment survives
+
+
+def test_delayed_you_echo_kept_without_echo_lag() -> None:
+    you = [seg("You", "Washington DC come watch", 12.0, 18.0)]
+    them = [seg("Them", "Washington DC come watch", 3.0, 9.0)]
+    out = merge_transcripts(you, them)  # no echo_lag_s -> backward compat
+    assert len(out) == 2
+    assert you[0] in out
+    assert them[0] in out
+
+
+def test_genuine_you_kept_when_low_similarity_even_with_lag() -> None:
+    you = [seg("You", "testing one two three hello", 3.0, 11.0)]
+    them = [seg("Them", "Washington DC live markets", 3.14, 9.38)]
+    out = merge_transcripts(you, them, echo_lag_s=9.0)
+    assert len(out) == 2
+    assert you[0] in out  # low token ratio -> kept
+    assert them[0] in out
+
+
+def test_delayed_you_echo_beyond_lag_kept() -> None:
+    you = [seg("You", "same words here", 25.0, 30.0)]
+    them = [seg("Them", "same words here", 1.0, 5.0)]
+    out = merge_transcripts(you, them, echo_lag_s=5.0)
+    assert len(out) == 2
+    assert you[0] in out  # offset 24 > 5.75 -> kept
+    assert them[0] in out
+
+
+def test_existing_overlap_echo_still_dropped_with_echo_lag() -> None:
+    you = [seg("You", "we should ship on friday", 0.0, 2.0)]
+    them = [seg("Them", "we should ship on friday", 1.0, 3.0)]
+    out = merge_transcripts(you, them, echo_lag_s=9.0)
+    assert out == them  # overlap rule; You precedes Them but overlaps

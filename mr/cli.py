@@ -21,6 +21,7 @@ binary is spawned via ``subprocess.Popen`` and only the PID is persisted.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import signal
@@ -119,6 +120,18 @@ def _transcripts_dir(cfg: Config) -> Path:
     return Path(cfg.out_root) / "transcripts"
 
 
+def _system_vs_mic_offset(out_dir: str) -> float | None:
+    """Seconds by which the system (speaker) stream lags the mic stream's start,
+    from meta.json (mic.first_sample_seconds vs system.first_sample_seconds).
+    None when meta.json is missing/unparseable or lacks the fields."""
+    try:
+        meta = json.loads((Path(out_dir) / "meta.json").read_text(encoding="utf-8"))
+        m, s = meta["mic"], meta["system"]
+        return float(s["first_sample_seconds"]) - float(m["first_sample_seconds"])
+    except (OSError, KeyError, ValueError, TypeError):
+        return None
+
+
 def _transcribe_and_write(
     cfg: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False
 ) -> Path:
@@ -135,8 +148,12 @@ def _transcribe_and_write(
     them = transcribe_audio(
         str(o / "system.wav"), speaker="Them", model=cfg.model, language=cfg.language
     )
+    echo_lag = _system_vs_mic_offset(out_dir)
     merged = merge_transcripts(
-        list(you.segments), list(them.segments), dedup_threshold=cfg.dedup_threshold
+        list(you.segments),
+        list(them.segments),
+        dedup_threshold=cfg.dedup_threshold,
+        echo_lag_s=echo_lag,
     )
     duration = max((s.end for s in list(you.segments) + list(them.segments)), default=0.0)
     md_path = _transcripts_dir(cfg) / f"{stamp}.md"
