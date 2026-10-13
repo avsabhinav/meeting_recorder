@@ -329,12 +329,13 @@ def status() -> None:
     if state is None:
         typer.echo("recording: no")
     else:
-        typer.echo("recording: yes")
+        recording = not is_stale(state)
+        typer.echo(f"recording: {'yes' if recording else 'no'}")
         typer.echo(f"pid: {state.pid}")
         typer.echo(f"out_dir: {state.out_dir}")
         typer.echo(f"stamp: {state.stamp}")
         typer.echo(f"started_at: {state.started_at}")
-        if is_stale(state):
+        if not recording:
             typer.echo("stale pidfile; run `mr stop` to clear", err=True)
     tdir = _transcripts_dir(cfg)
     if tdir.is_dir():

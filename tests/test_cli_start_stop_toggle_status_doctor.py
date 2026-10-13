@@ -82,6 +82,7 @@ def test_status_active(cfg, monkeypatch) -> None:
         1, 5566, "/tmp/x/recordings/s", "2026-01-01_0000", "2026-01-01T00:00:00Z"
     )
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli, "is_stale", lambda state: False)
     tdir = Path(cfg.out_root) / "transcripts"
     tdir.mkdir(parents=True)
     (tdir / "2025-12-31_1200.md").write_text("# older\n", encoding="utf-8")
@@ -99,6 +100,7 @@ def test_status_active_but_transcripts_dir_empty(cfg, monkeypatch) -> None:
         1, 5566, "/tmp/x/recordings/s", "2026-01-01_0000", "2026-01-01T00:00:00Z"
     )
     monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli, "is_stale", lambda state: False)
     # transcripts dir exists but holds no *.md files -> must not IndexError.
     tdir = Path(cfg.out_root) / "transcripts"
     tdir.mkdir(parents=True)
@@ -106,6 +108,22 @@ def test_status_active_but_transcripts_dir_empty(cfg, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "recording: yes" in result.output
     assert "no transcript yet" in result.output
+
+
+def test_status_stale_prints_no(cfg, monkeypatch) -> None:
+    state = RecordingState(
+        1, 5566, "/tmp/x/recordings/s", "2026-01-01_0000", "2026-01-01T00:00:00Z"
+    )
+    monkeypatch.setattr(mr.cli, "read_state", lambda out_root: state)
+    monkeypatch.setattr(mr.cli, "is_stale", lambda state: True)
+    result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0, result.output
+    assert "recording: no" in result.output
+    assert "pid:" in result.output
+    assert "out_dir:" in result.output
+    assert "stamp:" in result.output
+    assert "started_at:" in result.output
+    assert "stale pidfile" in result.stderr
 
 
 def test_stop_not_recording(cfg, monkeypatch) -> None:
