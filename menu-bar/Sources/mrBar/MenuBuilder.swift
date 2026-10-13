@@ -6,7 +6,8 @@ import AppKit
 /// gathers the state and calls `rebuild`. All items target the controller via
 /// target/action; disabled rows have no action at all.
 final class MenuBuilder {
-    /// The retained menu. Assign it to `statusItem.menu` (which keeps it alive).
+    /// The retained menu. Popped up on button click via `NSMenu.popUp` (kept
+    /// alive by the controller's strong reference).
     let menu = NSMenu()
 
     /// Action target (the `StatusItemController`). Weak + settable so the
@@ -31,18 +32,8 @@ final class MenuBuilder {
     func rebuild(status: MRStatus, isCLIAvailable: Bool, transcribing: [TranscriptionState.Heartbeat]) {
         menu.removeAllItems()
 
-        // MB-SW10: first row is ENABLED but harmless. A single icon click opens the
-        // menu and macOS auto-activates the first ENABLED actionable item (it skips
-        // disabled rows), so this row — not "Start Recording" — absorbs the accidental
-        // activation. Its action is a no-op.
-        let header = NSMenuItem(
-            title: statusHeader(status),
-            action: #selector(StatusItemController.statusHeaderClicked(_:)),
-            keyEquivalent: ""
-        )
-        header.target = target
-        header.isEnabled = true
-        menu.addItem(header)
+        // Row 1: inert status label (no action, disabled).
+        menu.addItem(disabledItem(statusHeader(status)))
 
         let start = NSMenuItem(
             title: "Start Recording",

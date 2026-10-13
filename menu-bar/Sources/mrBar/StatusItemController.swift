@@ -4,15 +4,16 @@ import AppKit
 ///
 /// - Icon: `mic.fill` template image — grayscale when idle, tinted
 ///   `systemRed` while live (no custom assets; SF symbols only).
-/// - Refresh is **lazy**: `NSMenuDelegate.menuWillOpen` rebuilds the menu and
-///   icon from `mr status` + the transcription heartbeat. No timers/polling.
+/// - Refresh is **lazy**: the button-click handler (`togglePressed`) rebuilds
+///   the menu and icon from `mr status` + the transcription heartbeat. No
+///   timers/polling.
 /// - Start is a quick synchronous CLI call; Stop is dispatched to a background
 ///   queue (it blocks 1–3 min transcribing) and the icon flips to idle
 ///   **immediately**, per the brief.
 ///
 /// The controller only shells out to `mr` via `MRCLI` — it never spawns
 /// `mr-capture` and never touches the pidfile/heartbeat files (read-only).
-final class StatusItemController: NSObject, NSMenuDelegate {
+final class StatusItemController: NSObject {
     let statusItem: NSStatusItem
     let menuBuilder: MenuBuilder
 
@@ -36,8 +37,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         super.init()
         self.menuBuilder.target = self
 
-        menuBuilder.menu.delegate = self
-        statusItem.menu = menuBuilder.menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(togglePressed(_:))
         setLive(false)
     }
 
@@ -86,12 +87,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.button?.needsDisplay = true
     }
 
-    // MARK: - NSMenuDelegate
-
-    /// Lazy refresh trigger: fires on the main thread each time the dropdown
-    /// opens. Rebuilding inside `menuWillOpen` is the sanctioned pattern.
-    func menuWillOpen(_ menu: NSMenu) {
+    /// Button click handler — the ONLY way the dropdown opens. Refreshes state,
+    /// then pops the menu up explicitly. Because popUp is invoked from a
+    /// completed, separate click event, nothing inside the menu can be
+    /// auto-activated by the SAME click that opened it (unlike assigning
+    /// `.menu` directly, which lets AppKit treat open+click as one gesture).
+    @objc func togglePressed(_ sender: Any?) {
         refresh()
+        guard let button = statusItem.button else { return }
+        menuBuilder.menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: button.bounds.maxY + 4),
+            in: button
+        )
     }
 
     // MARK: - Actions (target of the menu items)
@@ -277,9 +285,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             alert.runModal()
         }
     }
-
-    /// No-op: row-1 status header absorbs an accidental icon-click activation (MB-SW10).
-    @objc func statusHeaderClicked(_ sender: Any?) {}
 
     /// "Quit" → terminate the app.
     @objc func quit(_ sender: Any?) {
