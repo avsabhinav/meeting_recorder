@@ -227,8 +227,8 @@ from git tracking); (3) **GitHub Actions CI**: ruff + pytest + Swift build for b
 ## Epic PP-CI — GitHub Actions: lint + test + Swift build (2 tasks)
 | id | Task | Status | Depends |
 |----|------|--------|---------|
-| C1 | Add `.github/workflows/ci.yml`: a single workflow running on `macos-15` (Apple Silicon, macOS 14.2+ SDK available) on `push` + `pull_request`: (a) setup-python 3.12; (b) `pip install -e ".[dev]"`; (c) `ruff check mr tests`; (d) `pytest`; (e) `cd capture && ./build.sh`; (f) `cd menu-bar && ./build.sh && swift test --disable-sandbox`. One job, sequential steps. | todo | H3 |
-| C2 | Add a small README "CI status" badge line + a `docs/CONTRIBUTING.md` PR-checklist section pointing at the CI; verify the workflow YAML is well-formed (parse via GitHub's schema-free check or a YAML linter). | todo | C1 |
+| C1 | Add `.github/workflows/ci.yml`: a single workflow running on `macos-15` (Apple Silicon, macOS 14.2+ SDK available) on `push` + `pull_request`: (a) setup-python 3.12; (b) `pip install -e ".[dev]"`; (c) `ruff check mr tests`; (d) `pytest`; (e) `cd capture && ./build.sh`; (f) `cd menu-bar && ./build.sh && swift test --disable-sandbox`. One job, sequential steps. | done | H3 |
+| C2 | README: add a short "CI" line noting that GitHub Actions runs ruff + pytest + Swift build/test on every push & PR (a badge URL can't be filled until the repo has a known GitHub remote, so document the behavior instead of guessing a URL); the workflow YAML is validated (yaml ok, top keys name/on/jobs, runs-on macos-15, 8 ordered steps). | done | C1 |
 
 - **PP-CI acceptance:** `.github/workflows/ci.yml` is valid YAML; each step's exact command
   exits 0 when run locally the same way (ruff, pytest, both `build.sh`, `swift test`).
@@ -236,19 +236,33 @@ from git tracking); (3) **GitHub Actions CI**: ruff + pytest + Swift build for b
 ## Epic PP-DOCS — production-facing documents (2 tasks)
 | id | Task | Status | Depends |
 |----|------|--------|---------|
-| D1 | Add `CONTRIBUTING.md` (fork/PR flow, setup, `mr doctor`, how to run the checks, how to build both Swift helpers, spike→archive note) and `SECURITY.md` (local-first: how to report; note recordings stay local under `~/Meetings`; no secrets in the repo). | todo | C2 |
-| D2 | Public-repo hygiene review + README touches: swap `PLAN.md`/`PHASE0_SPIKE.md` spike-era references for a pointer to the archived spike / production docs; confirm README "Project layout" no longer lists `spike/` as a tracked dir; final `git status` clean. | todo | D1 |
+| D1 | Add `CONTRIBUTING.md` (fork/PR flow, setup, `mr doctor`, how to run the checks, how to build both Swift helpers, spike→archive note) and `SECURITY.md` (local-first: how to report; note recordings stay local under `~/Meetings`; no secrets in the repo). | done | C2 |
+| D2 | Public-repo hygiene review + README touches: swap `PLAN.md`/`PHASE0_SPIKE.md` spike-era references for a pointer to the archived spike / production docs; also archive root planning docs `PLAN.md`, `PHASE0_SPIKE.md`, `Project Goal.md` into `meeting-recorder-archive/` (user decision, alongside the spike) and untrack them; fix dangling refs in `docs/architecture.md`; remove `spike/` line from README "Project layout"; final `git status` clean. | done | D1 |
 
 - **PP-DOCS acceptance:** `CONTRIBUTING.md` + `SECURITY.md` exist and are accurate; README
   no longer references a tracked `spike/`; `git status --porcelain` clean.
 
 ## Full build/test gate (runs at the end, integration)
-- `./spike/.venv/bin/python -m pytest tests/ -q` (or the system 3.12 venv) green;
+- Dev/test interpreter is the archived venv at `../meeting-recorder-archive/spike/.venv/bin/python`
+  (Python 3.12.13; the `mr` package resolves editable to this repo) — CI creates its own 3.12 env.
+- `../meeting-recorder-archive/spike/.venv/bin/python -m pytest tests/ -q` green (146 passed);
   `ruff check mr tests` clean; `cd capture && ./build.sh` exit 0; `cd menu-bar && ./build.sh`
-  exit 0 + `swift test --disable-sandbox` green. Then a final commit is left staged/clean for
-  the user to push.
+  exit 0. `swift test --disable-sandbox` requires full Xcode (local machine has Command Line
+  Tools only, so it is validated on the CI macOS runner instead). Final commit is staged/clean
+  for the user to push.
 
 ## Progress log
 - **(this session) PP — PLANNED.** Audit complete. Decisions locked (public repo, archive
   spike, GH Actions CI). Repo is already well structured (mr/, capture/, menu-bar/, tests/,
   examples/, docs/) — no restructuring of source needed, only hygiene + CI + docs.
+- **(this session) PP — HYGIENE DONE (committed 5a8da33).** Archived `spike/` (with its .venv) to
+  `../meeting-recorder-archive/spike/`, `git rm -r --cached spike/`; `.gitignore` dropped stale
+  spike refs, added `/spike/`, `nohup.out`/`*.out`/`*.log`; tracked `docs/tasks/MB_1_menubar_app.md`;
+  removed on-disk `.pytest_cache`/`.ruff_cache`. Tree clean (zero untracked).
+- **(this session) PP — CI + DOCS DONE (commit pending).** `.github/workflows/ci.yml` added
+  (macos-15, setup-python 3.12, ruff, pytest, capture build, menu-bar build + swift test; trigger
+  push@main + pull_request; YAML validated). README gained a "Continuous integration" section.
+  `CONTRIBUTING.md` + `SECURITY.md` added. Per user decision, root planning docs `PLAN.md`,
+  `PHASE0_SPIKE.md`, `Project Goal.md` archived to `meeting-recorder-archive/` and untracked;
+  `docs/architecture.md` header rewritten; README "Project layout" no longer lists `spike/`.
+  Full gate green: ruff clean, 146 pytest passed, both `build.sh` exit 0.

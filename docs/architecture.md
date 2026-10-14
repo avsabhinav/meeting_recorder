@@ -1,7 +1,10 @@
 # Architecture Note — Production `mr` build
 
-Ties the Phase 0 spike findings to the production architecture (see `PLAN.md`,
-`spike/SPIKE_RESULTS.md`, `spike/TASKBOARD.md`).
+Documents the production architecture and the decisions carried over from the
+Phase 0 spike. The spike code and the Phase 0 planning docs (`PLAN.md`,
+`PHASE0_SPIKE.md`, and the original spike investigation/results) are archived out
+of this repo in a sibling `meeting-recorder-archive/` directory; this note is the
+canonical in-repo record of the design.
 
 ## Stack (locked)
 - **Python 3.12+** core (package `mr/`) + **Swift** capture helper (one binary `mr-capture`).

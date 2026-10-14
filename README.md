@@ -293,7 +293,6 @@ capture/       # SwiftPM package → mr-capture helper (build.sh, install.sh, In
 tests/         # core unit tests (transcriber mocked)
 examples/      # sample aligned WAVs + generated transcript
 docs/          # architecture, permissions & troubleshooting, test results
-spike/         # Phase 0 spike (findings, investigation notes)
 config.toml.example
 pyproject.toml # `mr` entry point, deps (mlx-whisper, typer, soundfile, rapidfuzz)
 ```
@@ -307,6 +306,21 @@ pytest
 ```
 
 Rebuild the capture helper after Swift changes: `cd capture && ./build.sh`.
+
+## Continuous integration
+
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to `main`
+and on every pull request. It executes on an Apple Silicon macOS 15 runner and:
+
+1. Installs the Python package (`pip install -e ".[dev]"`)
+2. Lints and tests the Python core — `ruff check mr tests` and `pytest`
+3. Builds both Swift helpers — `capture/build.sh` (`mr-capture`) and
+   `menu-bar/build.sh` (`mrBar`), then runs the menu-bar XCTest suite with
+   `swift test`
+
+Once the repo is pushed to GitHub, the check will run automatically there; a CI
+status badge can be added to the README after the repository has a final
+<owner>/<repo> URL.
 
 ## License
 

@@ -1,0 +1,40 @@
+name: ci
+
+"on":
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: macos-15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check mr tests
+
+      - name: Pytest
+        run: pytest
+
+      - name: Build mr-capture
+        run: cd capture && ./build.sh
+
+      - name: Build mrBar and run tests
+        run: cd menu-bar && ./build.sh && swift test --disable-sandbox
