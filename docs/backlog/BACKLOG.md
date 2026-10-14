@@ -187,3 +187,68 @@ User reported the transcript shows the user "repeating everything" that played o
   degrades the live call — user chose "record raw mic, stop VPIO entirely". Bug2: dropdown
   blocked by synchronous `mr status` on open — user chose lazy on-demand "Check Active
   Transcriptions…". Backlog restructured with epics CAP-AUDIO (A1–A3) and MB-DISPLAY (D1–D3).
+---
+
+# PRODUCTION PREP — repo reorganization, hygiene, CI, and docs (Epic PP)
+
+User decision: this will be a **public** GitHub repo. The Phase-0 spike was a quick
+test; everything works, now we get it production-ready for a first push. Decisions
+(confirmed): (1) **public repo** → strict hygiene review before push; (2) **archive the
+`spike/` folder out of the tracked repo** (move to a local archive outside the repo, drop
+from git tracking); (3) **GitHub Actions CI**: ruff + pytest + Swift build for both
+`capture/` and `menu-bar/`. The user pushes to GitHub themselves — we never push.
+
+## Current hygiene findings (pre-plan audit)
+- Clean `main` (massively auto-committed per-feature). 133 tracked files. No real
+  recordings/transcripts/state/config tracked. No `__pycache__` / `.DS_Store` tracked.
+  No personal data leaks (the `/Users/u/...` strings in `menu-bar/Tests` are fake
+  fixtures; the docs are scripted/fictional checkout conversations, no real calls).
+- **5 untracked items** that slip through `.gitignore` today:
+  1. `docs/tasks/MB_1_menubar_app.md` — a real task doc → **should be tracked**.
+  2. `menu-bar/nohup.out` — runtime cruft → **should be gitignored**.
+  3. `spike/echo_spike_analysis.py` + `spike/echo_spike_noisereduce.py` — the spike is
+     being archived out of the repo → **moved to archive, untracked/ignored**.
+  4. `spike/echo_spike_out/` (~3 MB of WAV binaries) → **moved to archive, ignored**.
+- `git rm --cached` will be used for the entire `spike/` tree (keeps local files, removes
+  from future tracking). The whole `spike/` folder is relocated to a local archive dir
+  **outside** the repo so nothing is lost but nothing gets pushed.
+
+## Epic PP-HYGIENE — clean tree, sane ignores, archive spike (3 tasks)
+| id | Task | Status | Depends |
+|----|------|--------|---------|
+| H1 | Archive `spike/` out of the repo: move the folder to a sibling archive dir outside the repo (e.g. `../meeting-recorder-archive/spike/`), `git rm -r --cached spike/` (keep working copy present until moved), add the archive path + `spike/` to `.gitignore` so no future spike artifacts are tracked. `git status` shows the whole `spike/` tree as removed. | done | — |
+| H2 | Track `docs/tasks/MB_1_menubar_app.md` (real doc); add `menu-bar/nohup.out`, `nohup.out` (repo-wide), and any leftover `*.log`/`*.out` runtime artifacts to `.gitignore`. After: `git status --porcelain` shows **zero** untracked files (tree fully clean). | done | H1 |
+| H3 | Remove `.pytest_cache/` and `.ruff_cache/` dirs from disk (already git-ignored, just tidy the worktree); confirm `.gitignore` is lean and complete; `git status` clean. | done | H2 |
+
+- **PP-HYGIENE acceptance:** `git status --porcelain` is empty (no untracked, no staged);
+  the `spike/` tree lives in the out-of-repo archive (files preserved on disk); running
+  `./build.sh` / `pytest` recreates caches that are all git-ignored.
+
+## Epic PP-CI — GitHub Actions: lint + test + Swift build (2 tasks)
+| id | Task | Status | Depends |
+|----|------|--------|---------|
+| C1 | Add `.github/workflows/ci.yml`: a single workflow running on `macos-15` (Apple Silicon, macOS 14.2+ SDK available) on `push` + `pull_request`: (a) setup-python 3.12; (b) `pip install -e ".[dev]"`; (c) `ruff check mr tests`; (d) `pytest`; (e) `cd capture && ./build.sh`; (f) `cd menu-bar && ./build.sh && swift test --disable-sandbox`. One job, sequential steps. | todo | H3 |
+| C2 | Add a small README "CI status" badge line + a `docs/CONTRIBUTING.md` PR-checklist section pointing at the CI; verify the workflow YAML is well-formed (parse via GitHub's schema-free check or a YAML linter). | todo | C1 |
+
+- **PP-CI acceptance:** `.github/workflows/ci.yml` is valid YAML; each step's exact command
+  exits 0 when run locally the same way (ruff, pytest, both `build.sh`, `swift test`).
+
+## Epic PP-DOCS — production-facing documents (2 tasks)
+| id | Task | Status | Depends |
+|----|------|--------|---------|
+| D1 | Add `CONTRIBUTING.md` (fork/PR flow, setup, `mr doctor`, how to run the checks, how to build both Swift helpers, spike→archive note) and `SECURITY.md` (local-first: how to report; note recordings stay local under `~/Meetings`; no secrets in the repo). | todo | C2 |
+| D2 | Public-repo hygiene review + README touches: swap `PLAN.md`/`PHASE0_SPIKE.md` spike-era references for a pointer to the archived spike / production docs; confirm README "Project layout" no longer lists `spike/` as a tracked dir; final `git status` clean. | todo | D1 |
+
+- **PP-DOCS acceptance:** `CONTRIBUTING.md` + `SECURITY.md` exist and are accurate; README
+  no longer references a tracked `spike/`; `git status --porcelain` clean.
+
+## Full build/test gate (runs at the end, integration)
+- `./spike/.venv/bin/python -m pytest tests/ -q` (or the system 3.12 venv) green;
+  `ruff check mr tests` clean; `cd capture && ./build.sh` exit 0; `cd menu-bar && ./build.sh`
+  exit 0 + `swift test --disable-sandbox` green. Then a final commit is left staged/clean for
+  the user to push.
+
+## Progress log
+- **(this session) PP — PLANNED.** Audit complete. Decisions locked (public repo, archive
+  spike, GH Actions CI). Repo is already well structured (mr/, capture/, menu-bar/, tests/,
+  examples/, docs/) — no restructuring of source needed, only hygiene + CI + docs.

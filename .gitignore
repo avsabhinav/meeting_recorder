@@ -16,7 +16,6 @@ capture/.build/
 capture/.tmp/
 capture/.modcache/
 capture/.swiftpm-cache/
-spike/capture/.build/
 
 # Swift / menu-bar
 menu-bar/.build/
@@ -24,9 +23,14 @@ menu-bar/.tmp/
 menu-bar/.modcache/
 menu-bar/.swiftpm-cache/
 
-# throwaway spike artifacts (folded in from spike/.gitignore)
-spike/out/
-spike/.venv/
+# Runtime / daemon artifacts (e.g. nohup.out from launching helpers/apps)
+nohup.out
+*.out
+*.log
+
+# Phase-0 spike — archived out of the repo (see meeting-recorder-archive/ sibling).
+# `/spike/` is ignored so no spike artifact ever gets tracked again.
+/spike/
 
 # demo outputs
 examples/demo/output/

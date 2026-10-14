@@ -1,6 +1,0 @@
-# throwaway spike artifacts
-spike/out/
-spike/.venv/
-spike/capture/.build/
-.DS_Store
-__pycache__/
