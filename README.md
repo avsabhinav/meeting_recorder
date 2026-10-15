@@ -316,6 +316,11 @@ Add a Script Command with:
 - Input: none (stdout = output)
 - Then assign a hotkey (e.g. **⌥⌘R**) to the command.
 
+Prefer a drag-and-drop installer? See
+[docs/installing.md](docs/installing.md) — it covers the DMG install, the
+first-launch Gatekeeper step (right-click → Open), and the terminal `mr`
+command.
+
 ## Menu-bar app (beta)
 
 `mrBar` is an optional menu-bar app (no Dock icon — `LSUIElement`) that drives the

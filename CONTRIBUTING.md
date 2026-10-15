@@ -26,6 +26,8 @@ cd menu-bar && ./build.sh
 
 `mr doctor` reports the macOS version, whether the `mr-capture` helper is found, and whether the Whisper model is cached (`mr doctor --fetch-model` downloads it).
 
+To build the distributable DMG, run `packaging/make_dmg.sh` (produces `dist/MeetingRecorder-<version>.dmg`). End-user install instructions: [docs/installing.md](docs/installing.md).
+
 ## Checking your work before you push
 
 Run all of these locally — CI runs the same steps:
