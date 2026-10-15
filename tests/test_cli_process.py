@@ -105,11 +105,20 @@ def test_process_missing_file(tmp_path, wav_pair, monkeypatch) -> None:
     assert "not found" in result.output
 
 
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences so assertions are robust to rich's terminal
+    rendering (newer rich versions colour the --help output, breaking substring
+    checks on the raw output)."""
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def test_help_lists_process_and_options(wav_pair) -> None:
     result = runner.invoke(app, ["process", "--help"])
     assert result.exit_code == 0
-    assert "--mic" in result.output
-    assert "--system" in result.output
+    assert "--mic" in _strip_ansi(result.output)
+    assert "--system" in _strip_ansi(result.output)
     top = runner.invoke(app, ["--help"])
     assert top.exit_code == 0
-    assert "process" in top.output
+    assert "process" in _strip_ansi(top.output)
