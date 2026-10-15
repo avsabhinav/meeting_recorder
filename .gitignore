@@ -32,5 +32,10 @@ nohup.out
 # `/spike/` is ignored so no spike artifact ever gets tracked again.
 /spike/
 
+# Internal developer-only docs (task briefs, backlog, checkpoints, manual-test
+# writeups). Kept on disk for development but not shipped to the public repo;
+# only the user-facing docs under docs/ are tracked.
+/developers/
+
 # demo outputs
 examples/demo/output/
