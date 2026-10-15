@@ -1,12 +1,108 @@
 # meeting-recorder
 
-A local-first macOS tool that records a 1:1 call (your mic **and** the other
-side via system audio) and transcribes it **locally** into an **attributed
-Markdown transcript** — every line marked as *You* or *Them* — ready for you or
-other AI agents to consume.
+A tiny, private macOS tool that records a 1:1 call — your voice and the other
+side's voice — and transcribes it **entirely on your Mac** into a **plain
+Markdown file** where every line is labeled `You` or `Them`. No cloud, no
+account, no bloat.
 
-No cloud, no LLM: capture → local Whisper transcription → attributed Markdown.
-Everything (recording, transcription, output) stays on your Mac.
+It's made for people who keep their own context: if you run a personal agent
+and have an Obsidian vault (or any local second brain), this hands your agent
+a clean transcript and lets **it** do the thinking — not a built-in
+summarizer that only saw the meeting.
+
+No cloud, no LLM on your behalf: capture → local transcription → a `.md` file
+that stays on your Mac. That's the whole product.
+
+---
+
+## Why this exists (and why you might want it)
+
+I built this to solve my own small problem, and I'm sharing it in case it
+helps someone else.
+
+I was tired of meeting-summary apps — Granola, OpenWhispr, Meetily, and the
+rest. They're packed with features I never asked for, and the summaries they
+spit out always felt off. Here's why: a summary is only as good as the context
+behind it, and those tools only see the meeting. The person who actually has
+context is **you** — your notes, your memory, your Obsidian vault, your
+personal agent.
+
+So I stopped asking a summarizer to think for me, and started asking **my own
+agent** to do the thinking.
+
+**What this tool does is deliberately small.** It records a one-on-one call
+(your mic plus the other side's voice), transcribes it **on your Mac**, and
+drops a clean Markdown file into a folder. Every line is labeled `You` or
+`Them`, so your agent can clearly read who said what.
+
+That's it. No built-in summaries, no fancy UI, no cloud, no account. The
+summary is your personal agent's job — because that's where the real context
+lives.
+
+**The workflow is two keypresses:**
+
+1. Tap your hotkey before the call → it starts recording.
+2. Tap it again after → it stops, transcribes in the background, and writes a
+   `.md` file to `~/Meetings/transcripts/`.
+
+Then your personal agent picks up that Markdown file, runs it against your
+memory and your vault's context, and turns it into something genuinely useful
+to *you* — not a generic summary.
+
+It keeps three promises the big tools can't:
+
+- **Private by default.** Nothing leaves your machine. Recording, transcription,
+  and the transcript are all local.
+- **Your format.** Plain Markdown files. Drop them straight into your Obsidian
+  vault or point your agent at the folder. No lock-in, no proprietary export.
+- **Built for your workflow.** The output is a raw conversation your own agent
+  can sort through with the context only you (and it) have.
+
+If your setup sounds like this — personal agents, an Obsidian second brain, and
+a preference for local, no-bloat software — this recorder is for you.
+
+## The 30-second mental model
+
+| You do | What happens |
+| --- | --- |
+| Tap your hotkey | It records your voice + the other side's voice. Private, on your Mac. |
+| Tap it again | It stops, transcribes both sides **locally**, and writes a Markdown file. |
+| Your agent reads it | It uses the `.md` transcript with *its* context to give you real insight. |
+
+The tool handles the boring part — getting a faithful, clearly-attributed
+transcript. **You** decide what it means.
+
+## Getting started in three steps
+
+Setup is a one-time thing (a little terminal, but only once — after that it's
+just two keypresses).
+
+```sh
+# 1. Install + build (one time; needs command line tools)
+pip install -e ".[dev]"
+bash capture/install.sh
+
+# 2. Check the setup, then fetch the transcription model (needs network, once)
+mr doctor
+mr doctor --fetch-model
+```
+
+Then record **any** call:
+
+```sh
+mr toggle   # start recording — take the call on your speakers
+mr toggle   # stop — transcribes locally in the background, writes transcripts/<stamp>.md
+```
+
+You'll get a macOS notification when the transcript is ready. Point your agent
+at `~/Meetings/transcripts/` (or your Obsidian vault) and let it do the rest.
+
+Prefer a button over the terminal? There's an optional menu-bar app
+(`mrBar`), and a step-by-step guide to binding `mr toggle` to a hotkey further
+down (`## Hotkey`). The full, detailed setup instructions are in the
+[Quick start](#quick-start) section.
+
+---
 
 ## How it works
 
