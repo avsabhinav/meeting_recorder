@@ -55,7 +55,20 @@ struct MRCLI {
     var invocation: MRInvocation? = AppInfo.resolveMrInvocation()
 
     func status() throws -> (out: String, exit: Int32) { try invoke(["status"]) }
-    func start() throws -> (out: String, exit: Int32) { try invoke(["start"]) }
+    func start() throws -> (out: String, exit: Int32) {
+        try start(withContextJSON: nil)
+    }
+    /// `mr start` with an optional `--context-json <path>` (CAL-L3). When
+    /// `withContextJSON` is non-nil, the file at that path is persisted as
+    /// `meeting_context.json` inside the new recording dir by the Python side.
+    /// Passing `nil` behaves exactly like the no-arg `start()`.
+    func start(withContextJSON: String? = nil) throws -> (out: String, exit: Int32) {
+        var args = ["start"]
+        if let ctx = withContextJSON {
+            args.append(contentsOf: ["--context-json", ctx])
+        }
+        return try invoke(args)
+    }
     func stop() throws -> (out: String, exit: Int32) { try invoke(["stop"]) }
     func setOutRoot(_ dir: String) throws -> (out: String, exit: Int32) {
         try invoke(["config", "set", "out_root", dir])
@@ -73,6 +86,38 @@ struct MRCLI {
         case .python(let p): (URL(fileURLWithPath: p), ["-m", "mr.cli"])
         }
         return try runner.run(exe, prefix + args)
+    }
+
+    /// Builds the `--context-json` payload for `mr start` (CAL-L3). Pure and
+    /// Foundation-only so it is testable without AppKit/EventKit. The six keys
+    /// pass through verbatim to the persisted `meeting_context.json` (the
+    /// Python side stores the raw JSON text). `start`/`end`/`notes` are already
+    /// formatted strings; attendeeless/note-less events still carry the key.
+    /// Returns `nil` only if the dictionary cannot serialize (should not
+    /// happen for these value types).
+    static func buildContextJSON(
+        title: String,
+        eventID: String,
+        start: String,
+        end: String,
+        attendees: [String],
+        notes: String
+    ) -> String? {
+        let obj: [String: Any] = [
+            "title": title,
+            "event_id": eventID,
+            "start": start,
+            "end": end,
+            "attendees": attendees,
+            "notes": notes,
+        ]
+        guard
+            let data = try? JSONSerialization.data(
+                withJSONObject: obj,
+                options: [.sortedKeys, .fragmentsAllowed]
+            )
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
 

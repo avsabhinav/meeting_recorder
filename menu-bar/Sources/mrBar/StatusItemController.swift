@@ -31,6 +31,11 @@ final class StatusItemController: NSObject {
 
     private var isLiveRecording = false
 
+    /// Events fetched by `startRecordingFromCalendar`, indexed by the row tag
+    /// of the dynamic submenu items so selection maps back to the meeting.
+    /// Set on the main thread just before the submenu pops; read only there.
+    private var pendingMeetingEvents: [MeetingEvent] = []
+
     /// Whether `mr` can be resolved (fixed at launch; resolving once avoids a
     /// `which mr` subprocess on every menu open).
     private let cliAvailable: Bool
@@ -219,6 +224,156 @@ final class StatusItemController: NSObject {
                 self.menuBuilder.menu.item(withTag: tag)?.title = final
                 self.statusItem.button?.needsDisplay = true
             }
+        }
+    }
+
+    // MARK: - Calendar quick-start (CAL-L3)
+
+    /// "Start Recording from Calendar…" (top-level item, tag 708). Checks/requests
+    /// Calendar access and fetches events in `[now−1h, now+2h]` OFF the main
+    /// thread, then pops a dynamic submenu of those events. Permission denied or
+    /// no events are surfaced gracefully — the calendar path never blocks a plain
+    /// recording.
+    @objc func startRecordingFromCalendar(_ sender: Any?) {
+        guard let statusItem = statusItem.button else { return }
+        let tag = MenuBuilder.calendarMenuTag
+        let item = menuBuilder.menu.item(withTag: tag)
+        let defaultTitle = item?.title ?? "Start Recording from Calendar…"
+        item?.title = "Searching for events…"
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let source = EventListProvider().source
+            // The permission request is async; run it in a child Task so the
+            // code stays off the main thread while still outside the
+            // synchronous global closure. Task inherits this background
+            // executor, so `await checkOrRequestAccess` never blocks main.
+            Task {
+                let access = await checkOrRequestAccess(source)
+                let title = defaultTitle
+                guard access == .granted else {
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        self.menuBuilder.menu.item(withTag: tag)?.title = title
+                        let alert = NSAlert()
+                        alert.alertStyle = .warning
+                        alert.messageText = "Calendar access not granted"
+                        alert.informativeText =
+                            "A calendar meeting is needed to start a recording with context. " +
+                            "Grant Calendar access in System Settings ▸ Privacy & Security ▸ Calendars."
+                        alert.runModal()
+                        self.statusItem.button?.needsDisplay = true
+                    }
+                    return
+                }
+
+                let events = EventListProvider().fetchCalendarEvents()
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.menuBuilder.menu.item(withTag: tag)?.title = title
+                    self.pendingMeetingEvents = events
+                    let sub = MenuBuilder.buildCalendarSubmenu(
+                        events,
+                        isEnabled: self.cliAvailable,
+                        target: self,
+                        action: #selector(StatusItemController.startRecordingWithCalendarEvent(_:))
+                    )
+                    sub.popUp(
+                        positioning: nil,
+                        at: NSPoint(x: statusItem.bounds.maxX, y: statusItem.bounds.maxY + 4),
+                        in: statusItem
+                    )
+                    self.statusItem.button?.needsDisplay = true
+                }
+            }
+        }
+    }
+
+    /// One event row of the dynamic calendar submenu chosen → start a recording
+    /// with that meeting attached via `mr start --context-json <tmp>`.
+    @objc func startRecordingWithCalendarEvent(_ sender: Any?) {
+        let index = (sender as? NSMenuItem)?.tag ?? -1
+        guard pendingMeetingEvents.indices.contains(index) else { return }
+        let meeting = pendingMeetingEvents[index]
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var failure: (title: String, detail: String)? = nil
+            var success = false
+            let tmpPath = self?.writeContextTempFile(for: meeting)
+            do {
+                let (out, exit) = try MRCLI().start(withContextJSON: tmpPath)
+                if exit == 0 {
+                    success = true
+                } else {
+                    failure = ("Could not start recording",
+                               out.isEmpty ? "mr start failed." : "mr start reported: \(out)")
+                }
+            } catch {
+                if let e = error as? MRCLIError {
+                    switch e {
+                    case .mrUnavailable:
+                        failure = ("mr CLI not found",
+                                   "Neither a 'mr' command on PATH nor the MR_PYTHON environment " +
+                                   "variable is available to this app. Start the app with MR_PYTHON " +
+                                   "set, or install mr on PATH.")
+                    case .processTimeout:
+                        failure = ("mr did not respond",
+                                   "The mr CLI did not finish within the timeout.")
+                    }
+                } else {
+                    failure = ("mr CLI not found", "The mr CLI could not be launched.")
+                }
+            }
+            if let tmpPath { try? FileManager.default.removeItem(atPath: tmpPath) }
+            guard let self else { return }
+            DispatchQueue.main.async {
+                if success {
+                    self.setLive(true)
+                }
+                if let failure {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = failure.title
+                    alert.informativeText = failure.detail
+                    alert.runModal()
+                }
+                self.statusItem.button?.needsDisplay = true
+            }
+        }
+    }
+
+    /// ISO8601 string for a meeting date ('' when nil), matching the repo's
+    /// existing ISO8601DateFormatter convention (see `TranscriptionState`).
+    /// `formatOptions` = internet date-time (no fractional seconds).
+    private static func iso8601String(for date: Date?) -> String {
+        guard let date else { return "" }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
+
+    /// Writes the `--context-json` payload for a meeting to a uniquely-named
+    /// file under the system temp dir and returns its path; nil on any failure.
+    /// The caller deletes the file after `mr start` returns.
+    private func writeContextTempFile(for meeting: MeetingEvent) -> String? {
+        guard
+            let json = MRCLI.buildContextJSON(
+                title: meeting.title,
+                eventID: meeting.id ?? "",
+                start: StatusItemController.iso8601String(for: meeting.start),
+                end: StatusItemController.iso8601String(for: meeting.end),
+                attendees: meeting.attendees,
+                notes: meeting.notes ?? ""
+            )
+        else { return nil }
+        let stamp = String(format: "%.0f", Date().timeIntervalSince1970)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mr-context-\(stamp)-\(UInt32.random(in: 1..<UInt32.max)).json")
+        do {
+            try Data(json.utf8).write(to: url, options: .atomic)
+            return url.path
+        } catch {
+            return nil
         }
     }
 

@@ -44,13 +44,16 @@ final class MenuBuilder {
     /// - `now`: current time (reserved for relative display; rows use absolute
     ///   `HH:mm` today).
     /// - `isEnabled`: applied to every event row (e.g. `isCLIAvailable`).
-    /// - `target`: action target for the event rows (`nil` until CAL-L3 wires
-    ///   `StatusItemController.startRecordingFromCalendar(_:)`).
+    /// - `target`: action target for the event rows.
+    /// - `action`: selector fired when an event row is chosen (CAL-L3:
+    ///   `StatusItemController.startRecordingWithCalendarEvent(_:)`). Each row's
+    ///   `tag` is its index into `events`, letting the target map back.
     static func buildCalendarSubmenu(
         _ events: [MeetingEvent],
         _ now: Date = Date(),
         isEnabled: Bool,
-        target: AnyObject? = nil
+        target: AnyObject? = nil,
+        action: Selector? = nil
     ) -> NSMenu {
         let submenu = NSMenu(title: "Start Recording from Calendar")
         submenu.autoenablesItems = false
@@ -70,7 +73,7 @@ final class MenuBuilder {
         for (index, event) in events.enumerated() {
             let item = NSMenuItem(
                 title: calendarRowTitle(of: event, now: now),
-                action: nil, // CAL-L3 wires this action: #selector(StatusItemController.startRecordingFromCalendar(_:))
+                action: action,
                 keyEquivalent: ""
             )
             item.tag = index
@@ -151,17 +154,27 @@ final class MenuBuilder {
         checkTranscriptions.isEnabled = isCLIAvailable
         menu.addItem(checkTranscriptions)
 
-        // Calendar quick-start (CAL-L2): pure construction; the caller supplies
-        // `calendarEvents` (fetched off-main in CAL-L3). Tag lets the
-        // controller find/repopulate this item in place.
-        let calendarItem = NSMenuItem(title: "Start Recording from Calendar…", action: nil, keyEquivalent: "")
-        calendarItem.tag = Self.calendarMenuTag
-        calendarItem.isEnabled = isCLIAvailable
-        calendarItem.submenu = Self.buildCalendarSubmenu(
-            calendarEvents,
-            isEnabled: isCLIAvailable,
-            target: target
+        // Calendar quick-start (CAL-L2/L3): a CLICK action on the top-level item
+        // that fetches events off-main and pops a dynamic submenu
+        // (`startRecordingFromCalendar`). We keep the item attachable to a
+        // static submenu only when the caller pre-supplies `calendarEvents`
+        // (still clickable either way). Tag lets the controller find/retitle it.
+        let calendarItem = NSMenuItem(
+            title: "Start Recording from Calendar…",
+            action: #selector(StatusItemController.startRecordingFromCalendar(_:)),
+            keyEquivalent: ""
         )
+        calendarItem.tag = Self.calendarMenuTag
+        calendarItem.target = target
+        calendarItem.isEnabled = isCLIAvailable
+        if !calendarEvents.isEmpty {
+            calendarItem.submenu = Self.buildCalendarSubmenu(
+                calendarEvents,
+                isEnabled: isCLIAvailable,
+                target: target,
+                action: #selector(StatusItemController.startRecordingWithCalendarEvent(_:))
+            )
+        }
         menu.addItem(calendarItem)
 
         // Storage location + folder access (MB-SW4): real actions. Both need
