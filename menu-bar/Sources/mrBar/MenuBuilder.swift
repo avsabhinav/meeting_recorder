@@ -10,10 +10,75 @@ final class MenuBuilder {
     /// controller can retitle it in place without rebuilding the menu.
     static let checkTranscriptionsTag = 707
 
+    /// Tag for the "Start Recording from Calendar…" top-level item (CAL-L2) so
+    /// the controller can find/retitle/repopulate its submenu in place.
+    static let calendarMenuTag: Int = 708
+
     /// Display text for the "Check Active Transcriptions…" result (MB-DISPLAY/D3).
     /// `nil` (no in-flight transcription) -> "None"; a stamp -> "<stamp> — transcribing…".
     static func transcriptionResultText(stamp: String?) -> String {
         stamp.map { "\($0) — transcribing…" } ?? "None (no active transcription)"
+    }
+
+    /// Short single-line label for one calendar event (CAL-L2):
+    /// `"<HH:MM> <title>"` (24-hour local time) when the event has a start
+    /// date, just `"<title>"` otherwise. The title is truncated to ~28
+    /// characters so a row stays tidy (~40 chars total).
+    static func calendarRowTitle(of event: MeetingEvent, now: Date = Date()) -> String {
+        let title: String
+        if event.title.count > 28 {
+            title = String(event.title.prefix(27)) + "…"
+        } else {
+            title = event.title
+        }
+        guard let start = event.start else { return title }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: start) + " " + title
+    }
+
+    /// Pure list→menu builder for the "Start Recording from Calendar" submenu
+    /// (CAL-L2). No calendar/permission/process code — just rows.
+    ///
+    /// - `events`: the upcoming meeting events (already sorted by the caller).
+    /// - `now`: current time (reserved for relative display; rows use absolute
+    ///   `HH:mm` today).
+    /// - `isEnabled`: applied to every event row (e.g. `isCLIAvailable`).
+    /// - `target`: action target for the event rows (`nil` until CAL-L3 wires
+    ///   `StatusItemController.startRecordingFromCalendar(_:)`).
+    static func buildCalendarSubmenu(
+        _ events: [MeetingEvent],
+        _ now: Date = Date(),
+        isEnabled: Bool,
+        target: AnyObject? = nil
+    ) -> NSMenu {
+        let submenu = NSMenu(title: "Start Recording from Calendar")
+        submenu.autoenablesItems = false
+
+        if events.isEmpty {
+            let empty = NSMenuItem(title: "No upcoming events", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            submenu.addItem(empty)
+            return submenu
+        }
+
+        // Thin disabled header so the submenu doesn't look bare.
+        let header = NSMenuItem(title: "Start Recording from Calendar", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        submenu.addItem(header)
+
+        for (index, event) in events.enumerated() {
+            let item = NSMenuItem(
+                title: calendarRowTitle(of: event, now: now),
+                action: nil, // CAL-L3 wires this action: #selector(StatusItemController.startRecordingFromCalendar(_:))
+                keyEquivalent: ""
+            )
+            item.tag = index
+            item.target = target
+            item.isEnabled = isEnabled
+            submenu.addItem(item)
+        }
+        return submenu
     }
 
     /// The retained menu. Popped up on button click via `NSMenu.popUp` (kept
@@ -38,7 +103,11 @@ final class MenuBuilder {
     ///   when not recording).
     /// - `isCLIAvailable`: `AppInfo.resolveMrInvocation() != nil` (resolved
     ///   once at app launch).
-    func rebuild(status: MRStatus, isCLIAvailable: Bool) {
+    /// - `calendarEvents`: upcoming meeting events for the
+    ///   "Start Recording from Calendar…" submenu (CAL-L2); defaults to `[]`
+    ///   so existing `rebuild(status:, isCLIAvailable:)` callers compile
+    ///   unchanged.
+    func rebuild(status: MRStatus, isCLIAvailable: Bool, calendarEvents: [MeetingEvent] = []) {
         menu.removeAllItems()
 
         // Row 1: inert status label (no action, disabled).
@@ -81,6 +150,19 @@ final class MenuBuilder {
         checkTranscriptions.target = target
         checkTranscriptions.isEnabled = isCLIAvailable
         menu.addItem(checkTranscriptions)
+
+        // Calendar quick-start (CAL-L2): pure construction; the caller supplies
+        // `calendarEvents` (fetched off-main in CAL-L3). Tag lets the
+        // controller find/repopulate this item in place.
+        let calendarItem = NSMenuItem(title: "Start Recording from Calendar…", action: nil, keyEquivalent: "")
+        calendarItem.tag = Self.calendarMenuTag
+        calendarItem.isEnabled = isCLIAvailable
+        calendarItem.submenu = Self.buildCalendarSubmenu(
+            calendarEvents,
+            isEnabled: isCLIAvailable,
+            target: target
+        )
+        menu.addItem(calendarItem)
 
         // Storage location + folder access (MB-SW4): real actions. Both need
         // the CLI (the app never reads/writes config itself), so they are
