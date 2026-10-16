@@ -16,6 +16,8 @@
 	<string>mrBar records the microphone during a call for local transcription.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>mrBar records system (speaker) audio during a call for local transcription.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>mrBar reads your Apple Calendar so you can attach the current meeting (title, attendees, notes) to a recording.</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHighResolutionCapable</key>
