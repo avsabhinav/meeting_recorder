@@ -50,10 +50,22 @@ examples/demo/    # sample aligned WAVs + generated .md
    hallucination_silence_threshold=0.0`; drop empty-text segments.
 6. **State ownership:** the CLI owns recording state via a pidfile in `~/Meetings/.state`.
    The future menu-bar app calls CLI/core; never records independently.
+7. **Meeting context (calendar):** transcripts carry an **Obsidian YAML
+   frontmatter** block rather than prose — the target audience keeps Obsidian
+   vaults and queries properties (`title`, `date`, `attendees`, `notes`,
+   `duration`, `source`). Context is captured **at start time**: the menu-bar
+   app (planned, EventKit — not shipping yet) hands the event to
+   `mr start --context-json <path>`, which persists `meeting_context.json`
+   into `recordings/<stamp>/`; the detached background transcriber reads it
+   later, so the transcriber never needs calendar access. EventKit access is
+   owned entirely by the menu-bar app, never by the Python core.
 
 ## Pipeline for one recording
 1. `mr toggle` (idle) → `mr start` → spawn `mr-capture --out ~/Meetings/recordings/<stamp>`
-   → write pidfile.
+   → write pidfile. `mr start` may also take `--context-json <path>`: it
+   validates the file as parseable JSON and persists the raw text as
+   `recordings/<stamp>/meeting_context.json` so the (detached) transcriber can
+   find it later.
 2. `mr toggle` (active) → `mr stop` → SIGINT `mr-capture` → finalized WAVs + meta.json
    → clear the recording pidfile → spawn a **detached background `mr _transcribe`
    process and return immediately** (a new recording can start right away).
@@ -61,6 +73,13 @@ examples/demo/    # sample aligned WAVs + generated .md
    `transcribe` both tracks (sequential) → `TranscriptionResult`s.
 4. `merge_transcripts(you, them, dedup_threshold=0.6)` → sorted, deduped segments.
 5. `output` → `~/Meetings/transcripts/<stamp>.md` (+ optional JSON sidecar).
+   If `recordings/<stamp>/meeting_context.json` exists (loaded by
+   `_transcribe_and_write`), the `.md` gets an **Obsidian YAML frontmatter**
+   block prepended — `title` (event title, fallback stamp), `date` (event
+   start, fallback today), `attendees` (flow list, omitted if empty), `notes`
+   (omitted if empty), `duration` (`<m>m <s>s`), `source` (`recordings/<stamp>/`)
+   — and the JSON sidecar gains a `"context"` key with the raw dict. No context
+   → output is identical to the plain path.
 6. `osascript` completion notification, then clear the heartbeat.
 
 ## Verifiable acceptance (commands)

@@ -201,12 +201,18 @@ mr toggle [--json]
 ### `mr start`
 
 ```
-mr start
+mr start [--context-json <path>]
 ```
 
 Spawns `mr-capture` (it keeps running after `mr start` exits) and records the
 state. If a capture is already active it prints
 `already recording (stamp …)` and exits 0.
+
+- `--context-json` — optional path to a JSON meeting-context file (title /
+  attendees / notes). The file is validated as parseable JSON and its raw text
+  is persisted as `meeting_context.json` inside the new `recordings/<stamp>/`
+  directory, so the background transcriber can attach it to the transcript as
+  Obsidian frontmatter later.
 
 ### `mr stop`
 
@@ -367,11 +373,51 @@ for how to verify your capture actually has audio.
 ├── recordings/<stamp>/              # <stamp> = YYYY-MM-DD_HHMM
 │   ├── mic.wav                      # You track (16 kHz mono)
 │   ├── system.wav                   # Them track (16 kHz mono)
-│   └── meta.json                    # capture metadata (device, samples_written, …)
+│   ├── meta.json                    # capture metadata (device, samples_written, …)
+│   └── meeting_context.json         # optional: attached meeting context (see below)
 └── transcripts/
     ├── <stamp>.md                   # attributed transcript (You / Them)
     └── <stamp>.json                 # optional, with --json
 ```
+
+## Meeting context (calendar)
+
+If a meeting context is attached at start time (via `mr start --context-json <path>`),
+the transcript picks it up automatically:
+
+- **`meeting_context.json`** is stored in `recordings/<stamp>/` next to the WAVs.
+  The detached background transcriber reads it when the call ends.
+- The `.md` transcript is then written with an **Obsidian YAML frontmatter** block
+  at the top — `title` (event title, falling back to the stamp), `date` (event
+  start, falling back to the recording date), `attendees` (a YAML flow list,
+  omitted when empty), `notes` (omitted when empty), `duration` (e.g. `42m 10s`),
+  and `source` (the `recordings/<stamp>/` dir). These become queryable Obsidian
+  properties, so you can find, sort, and link meetings from your vault. When no
+  context is attached, the `.md` is exactly the same as before (no frontmatter),
+  and the JSON sidecar (with `--json`) gains a `"context"` key with the raw
+  context dict.
+
+Example frontmatter:
+
+```
+---
+title: Weekly 1:1
+date: 2026-10-15T10:00:00Z
+attendees: [Alice, Bob]
+notes: Discuss Q3 roadmap
+duration: 42m 10s
+source: recordings/2026-08-24_1432/
+---
+```
+
+**Planned (menu-bar):** the `mrBar` app will gain a **"Start Recording from
+Calendar…"** submenu that lists Apple Calendar events from the last 1 hour
+through the next 2 hours. Picking an event starts a recording with that meeting
+attached as context (it builds the JSON and calls `mr start --context-json`);
+the plain **Start Recording** item keeps working without any calendar, and the
+feature degrades gracefully if Calendar permission is not granted. This part is
+the intended UX and is still being built — it is **not** shipping in the menu-bar
+app today.
 
 ## Transcription notes
 
