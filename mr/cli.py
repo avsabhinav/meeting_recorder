@@ -156,6 +156,7 @@ def _transcribe_and_write(
         echo_lag_s=echo_lag,
     )
     duration = max((s.end for s in list(you.segments) + list(them.segments)), default=0.0)
+    context = _read_meeting_context(o)
     md_path = _transcripts_dir(cfg) / f"{stamp}.md"
     write_transcript(
         md_path,
@@ -164,11 +165,28 @@ def _transcribe_and_write(
             source_dir=f"recordings/{stamp}",
             segments=merged,
             duration_seconds=duration,
+            context=context,
         ),
     )
     if json_sidecar:
-        write_json(md_path.with_suffix(".json"), render_transcript_json(merged, stamp=stamp))
+        write_json(
+            md_path.with_suffix(".json"),
+            render_transcript_json(merged, stamp=stamp, context=context),
+        )
     return md_path
+
+
+def _read_meeting_context(out_dir: Path) -> dict[str, object] | None:
+    """Load ``meeting_context.json`` from ``out_dir`` if present.
+
+    Returns the parsed dict, or ``None`` when the file is missing,
+    malformed, or not a JSON object. Never raises.
+    """
+    try:
+        parsed = json.loads((out_dir / "meeting_context.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _transcribe_worker(

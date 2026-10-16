@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from mr.core.output import (
     render_transcript_json,
@@ -47,6 +48,105 @@ def test_render_transcript_md_exact_format() -> None:
         duration_seconds=2530,
     )
     assert actual == expected
+
+
+def test_frontmatter_full_context() -> None:
+    context = {
+        "title": "Weekly 1:1",
+        "start": "2026-10-15T10:00:00Z",
+        "attendees": ["Alice", "Bob"],
+        "notes": "Discuss Q3 roadmap",
+    }
+    actual = render_transcript_md(
+        stamp="2026-08-24_1432",
+        source_dir="recordings/2026-08-24_1432/",
+        segments=SEGMENTS,
+        duration_seconds=2530,
+        context=context,
+    )
+    expected_head = (
+        "---\n"
+        "title: Weekly 1:1\n"
+        "date: 2026-10-15T10:00:00Z\n"
+        "attendees: [Alice, Bob]\n"
+        "notes: Discuss Q3 roadmap\n"
+        "duration: 42m 10s\n"
+        "source: recordings/2026-08-24_1432/\n"
+        "---\n"
+        "\n"
+        "# Meeting — 2026-08-24_1432\n"
+    )
+    assert actual.startswith(expected_head)
+    # Body unchanged after the frontmatter.
+    base = render_transcript_md(
+        stamp="2026-08-24_1432",
+        source_dir="recordings/2026-08-24_1432/",
+        segments=SEGMENTS,
+        duration_seconds=2530,
+    )
+    assert actual == expected_head + base[len("# Meeting — 2026-08-24_1432\n"):]
+
+
+def test_frontmatter_title_date_only_omits_attendees_notes() -> None:
+    md = render_transcript_md(
+        stamp="2026-08-24_1432",
+        source_dir="recordings/2026-08-24_1432/",
+        segments=SEGMENTS,
+        duration_seconds=2530,
+        context={"title": "Sync", "start": "2026-10-15T10:00:00Z"},
+    )
+    block = md.split("---")[1]
+    assert "attendees:" not in block
+    assert "notes:" not in block
+    assert block == (
+        "\ntitle: Sync\ndate: 2026-10-15T10:00:00Z\nduration: 42m 10s"
+        "\nsource: recordings/2026-08-24_1432/\n"
+    )
+    # Empty attendees list and empty notes are also omitted.
+    md2 = render_transcript_md(
+        stamp="s",
+        source_dir="d",
+        segments=SEGMENTS,
+        duration_seconds=60,
+        context={"title": "Sync", "attendees": [], "notes": ""},
+    )
+    block2 = md2.split("---")[1]
+    assert "attendees:" not in block2
+    assert "notes:" not in block2
+    assert "date: " + date.today().isoformat() + "\n" in block2
+
+
+def test_frontmatter_title_with_colon_is_quoted() -> None:
+    md = render_transcript_md(
+        stamp="2026-08-24_1432",
+        source_dir="recordings/2026-08-24_1432/",
+        segments=SEGMENTS,
+        duration_seconds=2530,
+        context={"title": "Q3: roadmap", "start": "2026-10-15T10:00:00Z"},
+    )
+    assert md.startswith('---\ntitle: "Q3: roadmap"\n')
+
+
+def test_frontmatter_attendees_quoted_when_needed() -> None:
+    md = render_transcript_md(
+        stamp="s",
+        source_dir="d",
+        segments=SEGMENTS,
+        duration_seconds=60,
+        context={"title": "T", "attendees": ["Alice", "Bob, Jr.", "Carol: admin"]},
+    )
+    assert "attendees: [Alice, \"Bob, Jr.\", \"Carol: admin\"]\n" in md
+
+
+def test_render_transcript_json_context_key() -> None:
+    context = {"title": "Weekly 1:1", "attendees": ["Alice"]}
+    with_ctx = render_transcript_json(SEGMENTS, stamp="2026-08-24_1432", context=context)
+    assert with_ctx["context"] == context
+    assert set(with_ctx) == {"schema_version", "stamp", "segments", "context"}
+    without = render_transcript_json(SEGMENTS, stamp="2026-08-24_1432")
+    assert "context" not in without
+    empty = render_transcript_json(SEGMENTS, stamp="2026-08-24_1432", context={})
+    assert "context" not in empty
 
 
 def test_duration_formatting() -> None:
