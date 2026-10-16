@@ -95,6 +95,35 @@ def test_spawn_capture_detaches_stdio(cfg, tmp_path, monkeypatch) -> None:
     assert (tmp_path / ".capture.log").is_file()
 
 
+def test_start_with_context_json(cfg, tmp_path, monkeypatch) -> None:
+    """CAL-P1: ``--context-json`` persists meeting context into the recording dir."""
+    monkeypatch.setattr(mr.cli, "_spawn_capture", lambda out_dir, binary: 5566)
+    monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
+    monkeypatch.setattr(mr.cli, "write_state", lambda *a, **k: None)
+    payload = '{"title": "Standup", "attendees": ["Alice", "Bob"]}'
+    tmpctx = tmp_path / "meeting.json"
+    tmpctx.write_text(payload, encoding="utf-8")
+    result = runner.invoke(app, ["start", "--context-json", str(tmpctx)])
+    assert result.exit_code == 0, result.output
+    m = re.search(r"recording started \(stamp (\S+)\)", result.output)
+    assert m is not None, result.output
+    stamp = m.group(1)
+    ctx_path = Path(cfg.out_root) / "recordings" / stamp / "meeting_context.json"
+    assert ctx_path.is_file()
+    assert ctx_path.read_text(encoding="utf-8") == payload
+
+
+def test_start_with_invalid_context_json(cfg, tmp_path, monkeypatch) -> None:
+    """CAL-P1: a missing/non-JSON ``--context-json`` path is rejected with exit 2."""
+    monkeypatch.setattr(mr.cli, "_spawn_capture", lambda out_dir, binary: 5566)
+    monkeypatch.setattr(mr.cli, "assert_capture_bin", lambda: "/x/mr-capture")
+    monkeypatch.setattr(mr.cli, "write_state", lambda *a, **k: None)
+    missing = tmp_path / "nope.json"
+    result = runner.invoke(app, ["start", "--context-json", str(missing)])
+    assert result.exit_code == 2, result.output
+    assert "--context-json file not found or invalid" in result.output
+
+
 def test_start_already_recording(cfg, monkeypatch) -> None:
     monkeypatch.setattr(mr.cli, "is_clear", lambda out_root: False)
     spawned: list[object] = []

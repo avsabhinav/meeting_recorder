@@ -225,8 +225,13 @@ def _model_cached(model: str) -> bool:
         return (Path.home() / ".cache" / "huggingface" / "hub" / repo_dir).is_dir()
 
 
-def _do_start(cfg: Config) -> None:
-    """Start a capture (shared by ``start`` and ``toggle``)."""
+def _do_start(cfg: Config, context_json: Path | None = None) -> None:
+    """Start a capture (shared by ``start`` and ``toggle``).
+
+    ``context_json`` is an optional path to a JSON file (title/attendees/
+    notes) whose raw text is persisted as ``meeting_context.json`` inside the
+    freshly-created recording dir, so a later transcription step can read it.
+    """
     if not is_clear(cfg.out_root):
         state = read_state(cfg.out_root)
         stamp = state.stamp if state is not None else "?"
@@ -237,6 +242,17 @@ def _do_start(cfg: Config) -> None:
     stamp = new_stamp()
     out_dir = _recordings_dir(cfg) / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
+    if context_json is not None:
+        msg = f"--context-json file not found or invalid: {context_json}"
+        try:
+            raw = context_json.read_text(encoding="utf-8")
+        except OSError as e:
+            raise typer.BadParameter(msg) from e
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise typer.BadParameter(msg) from e
+        (out_dir / "meeting_context.json").write_text(raw, encoding="utf-8")
     binary = assert_capture_bin()
     pid = _spawn_capture(str(out_dir), binary)
     write_state(cfg.out_root, pid, str(out_dir), stamp, datetime.now().isoformat())
@@ -414,9 +430,20 @@ def transcribe_worker(
 
 
 @app.command()
-def start() -> None:
+def start(
+    context_json: Annotated[
+        Path | None,
+        typer.Option(
+            "--context-json",
+            help=(
+                "JSON file with meeting context (title/attendees/notes) "
+                "to persist with this recording"
+            ),
+        ),
+    ] = None,
+) -> None:
     """Start recording (spawns ``mr-capture``; it keeps running after exit)."""
-    _do_start(load_config())
+    _do_start(load_config(), context_json=context_json)
 
 
 @app.command()
