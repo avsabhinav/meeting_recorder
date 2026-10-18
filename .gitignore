@@ -8,6 +8,12 @@ build/
 .pytest_cache/
 .ruff_cache/
 
+# PyInstaller freeze build outputs (packaging/freeze_cli.sh) — sizable,
+# machine-local; the frozen CLI is embedded into the DMG, never tracked.
+/build-freeze/
+/build-freeze-cache/
+/dist-freeze/
+
 # macOS
 .DS_Store
 

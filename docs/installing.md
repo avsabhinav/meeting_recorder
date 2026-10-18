@@ -1,66 +1,63 @@
 # Installing from the DMG
 
-A distributable disk image (`MeetingRecorder-<version>.dmg`, built by
-`packaging/make_dmg.sh`) contains `mrBar.app` (the menu-bar app), the
-`mr-capture` helper, and a double-click installer (`Install.command`).
+A distributable disk image (`Oatmeal-<version>.dmg`, built by
+`packaging/make_dmg.sh`) contains **only** `mrBar.app` (the menu-bar app) and
+an **Applications** shortcut. `mrBar.app` is **self-contained** — it bundles
+the frozen `mr` CLI and the `mr-capture` helper inside the app, so installing
+is a single drag. There is no installer step, no venv, and no `launchctl`
+wiring.
 
 ## Installing from the DMG
 
-1. Double-click the DMG to mount it (a volume named **Meeting Recorder** appears).
-2. Drag **mrBar.app** onto the **Applications** icon in the DMG window (it ends
-   up in `/Applications/mrBar.app`).
-3. Double-click **Install.command** in the DMG window. It opens a Terminal
-   window and installs everything for **your user only — no sudo needed**.
+1. Double-click the DMG (a volume named **Oatmeal** mounts and a Finder window
+   opens).
+2. Drag **mrBar.app** onto the **Applications** shortcut in the window (it
+   ends up in `/Applications/mrBar.app`). **Done.**
+3. Eject the volume. No separate installer step — the app is self-contained.
 
 ## First launch / Gatekeeper
 
 This build is **adhoc-signed, not notarized** (no Developer ID), so on a fresh
-Mac Gatekeeper will block the first launch of `mrBar.app` — and may also block
-double-clicking `Install.command`. You will see a dialog worded something like:
+Mac Gatekeeper will block the first launch of `mrBar.app`. You will see a
+dialog worded something like:
 
 > "mrBar" can't be opened because Apple cannot check it for malicious software.
 
 Fix it once: **right-click (control-click) `mrBar.app` → Open → Open** in the
-confirmation dialog. The same right-click → Open trick works for
-`Install.command` if Gatekeeper refuses to run it. After that, normal
-double-click launches work.
+confirmation dialog. After that, normal double-click launches work.
 
-## Terminal `mr` command
+## Terminal `mr` command (optional, dev only)
 
-`Install.command` tries `pip install meeting-recorder` from PyPI, but the
-package **is not published on PyPI yet**, so that step fails and the installer
-finishes with an "INCOMPLETE" message — expected. To get the `mr` CLI working,
-use a checkout of the repo:
+The bundled app does **not** need the terminal `mr` command. If you want the
+standalone `mr` CLI in your own terminal, install it from a source checkout
+(the package is **not published on PyPI yet**):
 
 ```sh
 git clone <repo> && cd <repo>
-~/.local/share/mr-install/venv/bin/pip install -e .
+python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[dev]'
 ```
 
-Installing into the venv the installer already created makes the
-`~/.local/bin/mr` shim work immediately. Until the package lands on PyPI, a
-source checkout is required for the terminal `mr` command and for the
-menu-bar app's CLI calls.
+`mr doctor` (CLI tool) reports the macOS version, the `mr-capture` helper
+location, and whether the Whisper model is cached (`mr doctor --fetch-model`
+fetches it once).
 
-## How the installer wires things
+## How the install works
 
-- Creates a venv at `~/.local/share/mr-install/venv`; writes a
-  `~/.local/bin/mr` shim that runs `mr` from that venv.
-- Copies `mr-capture` to `/usr/local/bin` if writable, else `~/.local/bin`.
-- Finder-launched GUI apps don't inherit your shell's `PATH`, so the installer
-  sets `MR_PYTHON` and `MR_CAPTURE_BIN` via `launchctl setenv` — how a
-  Finder-launched `mrBar` finds the CLI (only affects apps launched **after**
-  the installer runs).
-- Add the bin dir to your `PATH` once, in `~/.zshrc`:
-  `export PATH="$HOME/.local/bin:$PATH"` — then open a **new** terminal.
+- The DMG is self-contained: `mrBar.app/Contents/Resources/mr-cli/` holds the
+  frozen `mr` CLI, and `mrBar.app/Contents/Resources/mr-capture` holds the
+  capture helper. The app resolves its own CLI and sets `MR_CAPTURE_BIN`
+  internally (PKG-BUNDLE), so a bundled install needs **no `PATH` setup, no
+  venv, and no `launchctl setenv`**.
+- **Dev / source checkouts only:** when you run `mrBar` from a source build
+  (not the DMG), it falls back to `mr` on `PATH` (e.g. `pip install -e .`),
+  then `MR_PYTHON`; the capture helper is found via `MR_CAPTURE_BIN` or the
+  repo build. See the README's "Menu-bar app" notes.
 
 ## Verifying
 
-1. `mr doctor` — reports the macOS version, the `mr-capture` helper location,
-   and whether the Whisper model is cached (`mr doctor --fetch-model` fetches
-   it once).
-2. Quit and relaunch the `mrBar` menu-bar app so it picks up the new
-   `MR_PYTHON` / `MR_CAPTURE_BIN` environment.
-3. `mr toggle` to start a test recording, `mr toggle` again to stop — you
-   should get a notification when the transcript lands in
+1. Launch `mrBar.app` (right-click → Open on first run) and grant the
+   microphone / audio permissions when prompted.
+2. Start a recording with the menu bar's **Start Recording**, then **Stop
+   Recording & Transcribe**.
+3. You should get a notification when the transcript lands in
    `~/Meetings/transcripts/`.

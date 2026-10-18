@@ -4,20 +4,21 @@
 # Usage: ./packaging/make_dmg.sh   (from anywhere; idempotent, user-local only)
 #
 # What it does:
-#   1. Builds mrBar.app          via menu-bar/install.sh
-#   2. Builds mr-capture         via capture/install.sh
-#   3. Stages a DMG volume containing:
+#   1. Freezes the mr CLI from source (packaging/freeze_cli.sh) so the bundled
+#      binary is always current — a stale dist-freeze must never ship.
+#   2. Builds mrBar.app (with the embedded frozen CLI + mr-capture inside)
+#      via menu-bar/install.sh
+#   3. Stages a DMG volume containing ONLY:
 #        mrBar.app
-#        mr-capture
-#        Install.command  (copied from packaging/Install.command if it
-#                          exists; a stub placeholder until PKG-B2 lands)
 #        Applications -> /Applications   (drag-to-install affordance)
-#        README install.txt
-#   4. Creates dist/MeetingRecorder-<VERSION>.dmg with hdiutil (UDZO, -ov).
+#      (single-drag; PKG-BUNDLE/5)
+#   4. Creates dist/Oatmeal-<VERSION>.dmg with hdiutil (UDZO, -ov), with a
+#      size computed from the staged content, and opens a laid-out Finder
+#      drag window.
 #
-# The DMG does NOT bundle the Python CLI: Install.command (PKG-B2) installs
-# the `mr` CLI and the mr-capture helper into the user's environment.
 # Everything is adhoc-signed, by design (no Developer ID).
+# PKG_DMG_STAGE_ONLY=1: assemble staging + layout, exit before hdiutil
+# (for sandboxed CI where hdiutil device/mount ops are denied).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -33,7 +34,7 @@ if [[ -f pyproject.toml ]]; then
 fi
 
 OUTPUT_DIR="$REPO_ROOT/dist"
-OUTPUT_DMG="$OUTPUT_DIR/MeetingRecorder-${VERSION}.dmg"
+OUTPUT_DMG="$OUTPUT_DIR/Oatmeal-${VERSION}.dmg"
 mkdir -p "$OUTPUT_DIR"
 
 # --- Staging dir + cleanup (removes staging, mount point, raw image on exit). -
@@ -50,55 +51,49 @@ VOL="$STAGING/volume"
 mkdir -p "$VOL"
 
 # --- 1. Build all artifacts fresh from source. ------------------------------
-echo "==> Building mrBar.app (menu-bar/install.sh)"
+# Freeze the CLI from the current source FIRST. `install.sh` embeds whatever is
+# in dist-freeze/mr-cli, so re-freezing here guarantees the DMG cannot carry a
+# stale binary (the working tree's cli.py is the source of truth).
+echo "==> Freezing the mr CLI from source (packaging/freeze_cli.sh)"
+bash packaging/freeze_cli.sh
+
+echo "==> Building mrBar.app (menu-bar/install.sh; embeds the frozen CLI + mr-capture)"
 bash menu-bar/install.sh
 
-echo "==> Building mr-capture (capture/install.sh)"
-bash capture/install.sh
-
-echo "==> Note: the Python CLI is not bundled; Install.command handles it."
-
 APP_SRC="$REPO_ROOT/menu-bar/.build/Release/mrBar.app"
-CAP_SRC="$REPO_ROOT/capture/.build/release/mr-capture"
 
 if [[ ! -d "$APP_SRC" ]]; then
   echo "make_dmg.sh: missing $APP_SRC (did menu-bar/install.sh succeed?)" >&2
   exit 1
 fi
-if [[ ! -x "$CAP_SRC" ]]; then
-  echo "make_dmg.sh: missing $CAP_SRC (did capture/install.sh succeed?)" >&2
-  exit 1
-fi
 
 # --- 2. Assemble the volume staging directory. ------------------------------
+# The volume now contains ONLY mrBar.app (with the embedded frozen CLI +
+# mr-capture inside it) and the Applications symlink — single-drag; PKG-BUNDLE/5.
 cp -R "$APP_SRC" "$VOL/mrBar.app"
-cp -f "$CAP_SRC" "$VOL/mr-capture"
-chmod +x "$VOL/mr-capture"
-
-# Install.command: use the real one when PKG-B2 has landed, else a stub.
-if [[ -f packaging/Install.command ]]; then
-  cp -f packaging/Install.command "$VOL/Install.command"
-else
-  cat > "$VOL/Install.command" <<'EOF'
-#!/usr/bin/env bash
-# Placeholder for the CLI installer (added in a later task, PKG-B2).
-echo "Run packaging/Install.command from the repo for the CLI installer (added in a later task)."
-EOF
-  chmod +x "$VOL/Install.command"
-fi
 
 # Drag-to-install affordance.
 ln -s /Applications "$VOL/Applications"
 
-# Short install note.
-cat > "$VOL/README install.txt" <<EOF
-Meeting Recorder ${VERSION} — install
+# Compute a raw-image size that surely fits the staged content. The app is
+# ~950 MB (embedded frozen CLI across ~3k small files), so a fixed 200m can
+# never hold it. du -sk gives KiB; convert to MiB, then add a generous margin:
+# HFS+ allocates in large blocks and adds per-file metadata, so the raw volume
+# needs *notably* more than the apparent size (100m cushion proved too small on
+# a real build). Use 50% headroom with a 1536m floor (plain 1.5 GiB works fine;
+# the UDZO-compressed output is far smaller than the raw image).
+APP_MB=$(($(du -sk "$VOL" | awk '{print $1}') / 1024))
+SIZE_MB=$((APP_MB + APP_MB / 2))
+if [[ $SIZE_MB -lt 1536 ]]; then SIZE_MB=1536; fi
 
-  1. Drag mrBar.app into the Applications folder (the icon on the right).
-  2. Double-click Install.command to install the mr CLI and helper.
-  3. First launch: right-click mrBar.app (or Install.command) and choose
-     Open, since this build is adhoc-signed, not notarized.
-EOF
+# PKG_DMG_STAGE_ONLY=1: assemble staging + layout, then exit before hdiutil
+# (for sandboxed CI where hdiutil device/mount ops are denied). No DMG written.
+if [[ "${PKG_DMG_STAGE_ONLY:-0}" == "1" ]]; then
+  echo "==> STAGE_ONLY: staging complete at $VOL (cleanup removes it on exit)"
+  echo "==> STAGE_ONLY SIZE_MB=${SIZE_MB}m"
+  echo "==> STAGE_ONLY content:"; find "$VOL" -maxdepth 1 -print | sort
+  exit 0
+fi
 
 # --- 3. Create the DMG (compressed, overwrite any existing one). ------------
 # `hdiutil create -srcfolder` fails with "Directory not empty" on recent macOS,
@@ -109,10 +104,18 @@ rm -f "$OUTPUT_DMG"
 raw_image="$(mktemp -u "${TMPDIR:-/tmp}/mr-raw.XXXXXX").dmg"
 MOUNT_PT="$(mktemp -d "${TMPDIR:-/tmp}/mr-mount.XXXXXX")"
 
-hdiutil create -size 200m -fs HFS+ -volname "Meeting Recorder" "$raw_image" >/dev/null
+hdiutil create -size "${SIZE_MB}m" -fs HFS+ -volname "Oatmeal" "$raw_image" >/dev/null
 hdiutil attach "$raw_image" -mountpoint "$MOUNT_PT" -nobrowse >/dev/null
 # Copy the staging tree (including the Applications symlink) into the volume.
 ditto "$VOL" "$MOUNT_PT"
+
+# Open + lay out the mounted window so double-clicking the DMG shows the
+# classic "drag mrBar.app to Applications" window immediately.
+open "$MOUNT_PT"
+osascript -e 'tell application "Finder" to activate' \
+  -e 'tell application "Finder" to set the bounds of the front window to {50, 50, 520, 480}' \
+    >/dev/null 2>&1 || true
+
 hdiutil detach "$MOUNT_PT" >/dev/null
 hdiutil convert "$raw_image" -format UDZO -o "$OUTPUT_DMG"
 

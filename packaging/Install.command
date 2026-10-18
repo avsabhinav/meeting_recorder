@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Meeting Recorder — installer (double-clickable from the DMG).
+# Oatmeal — installer (double-clickable from the DMG).
 #
 # Sets up, for the current user only (NO sudo):
 #   1. The `mr` Python CLI  ->  ~/.local/bin/mr   (shim into a venv python)
