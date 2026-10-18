@@ -1,6 +1,6 @@
 import AppKit
 
-// mrBar — macOS menu-bar app entrypoint (MB-SW3).
+// Oatmeal — macOS menu-bar app entrypoint (MB-SW3).
 //
 // A pure shell around the `mr` CLI: an NSStatusItem + dropdown. No dock icon
 // (`.accessory` activation policy — the canonical menu-bar-app mode; a future

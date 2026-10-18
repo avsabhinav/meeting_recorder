@@ -3,21 +3,25 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>mrBar</string>
+	<string>Oatmeal</string>
+	<key>CFBundleDisplayName</key>
+	<string>Oatmeal</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.local.mrBar</string>
+	<string>com.oatmeal.app</string>
+	<key>CFBundleIconFile</key>
+	<string>app.icns</string>
 	<key>CFBundleExecutable</key>
-	<string>mrBar</string>
+	<string>Oatmeal</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>mrBar records the microphone during a call for local transcription.</string>
+	<string>Oatmeal records the microphone during a call for local transcription.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>mrBar records system (speaker) audio during a call for local transcription.</string>
+	<string>Oatmeal records system (speaker) audio during a call for local transcription.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>mrBar reads your Apple Calendar so you can attach the current meeting (title, attendees, notes) to a recording.</string>
+	<string>Oatmeal reads your Apple Calendar so you can attach the current meeting (title, attendees, notes) to a recording.</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHighResolutionCapable</key>

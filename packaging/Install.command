@@ -6,7 +6,7 @@
 #   2. The mr-capture helper -> /usr/local/bin/mr-capture (if writable)
 #                                   else ~/.local/bin/mr-capture
 #   3. launchctl setenv MR_PYTHON / MR_CAPTURE_BIN so the Finder-launched
-#      mrBar menu-bar app can find the CLI (GUI apps don't inherit your
+#      Oatmeal menu-bar app can find the CLI (GUI apps don't inherit your
 #      shell's PATH).
 #
 # Honest note on the `mr` package:
@@ -126,7 +126,7 @@ cp -f "$CAP_SRC" "$CAP_DEST"
 chmod +x "$CAP_DEST"
 note "Installed mr-capture -> $CAP_DEST"
 
-# --- 5. Wire the Finder-launched mrBar app ------------------------------------
+# --- 5. Wire the Finder-launched Oatmeal app ------------------------------------
 # GUI apps launched from Finder don't inherit your shell PATH; per-user
 # launchd env (launchctl setenv) is the native way to reach them.
 note "Setting launchd env for GUI apps (affects apps launched AFTER this)"
@@ -144,12 +144,12 @@ Next steps:
   1. Add the CLI bin dir to your PATH (once) — append to ~/.zshrc:
          export PATH="$BIN:$PATH"
      Then open a NEW terminal. (Contains: mr)
-  2. Relaunch the mrBar menu-bar app (quit it and start it again) so it
+  2. Relaunch the Oatmeal menu-bar app (quit it and start it again) so it
      picks up the new launchd env.
   3. Verify with:  mr doctor
 
 First launch note: this build is adhoc-signed, not notarized — if Gatekeeper
-blocks mrBar.app (or this script), right-click it and choose "Open".
+blocks Oatmeal.app (or this script), right-click it and choose "Open".
 EOF
 
 if [[ "$MR_INSTALLED" -ne 1 ]]; then

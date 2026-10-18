@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build mrBar and assemble the menu-bar .app bundle (MB-SW4).
+# Build Oatmeal and assemble the menu-bar .app bundle (MB-SW4).
 #
 # Usage: ./install.sh   (from anywhere; idempotent, no sudo)
 #
 # Produces:
-#   menu-bar/.build/Release/mrBar.app
-#     Contents/MacOS/mrBar     (the release binary from ./build.sh)
+#   menu-bar/.build/Release/Oatmeal.app
+#     Contents/MacOS/Oatmeal   (the release binary from ./build.sh)
 #     Contents/Info.plist      (LSUIElement + mic/audio usage strings)
 #
 # The bundle is left in the build dir — drag it into /Applications manually
@@ -13,10 +13,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Overwrite the menu-bar glyph with the new branding asset so SwiftPM bundles
+# the NEW icon into Oatmeal_Oatmeal.bundle (BRAND-2).
+cp -f "../assets/branding/icon-white.png" "Sources/Oatmeal/Resources/icon-white.png"
+cp -f "../assets/branding/appIcon-recording.png" "Sources/Oatmeal/Resources/icon-recording.png"
+
 ./build.sh
 
-BIN="$(pwd)/.build/release/mrBar"
-APP="$(pwd)/.build/Release/mrBar.app"
+BIN="$(pwd)/.build/release/Oatmeal"
+APP="$(pwd)/.build/Release/Oatmeal.app"
 FROZEN_CLI="$(pwd)/../dist-freeze/mr-cli"     # repo-root frozen onedir tree
 CAP_BIN="$(pwd)/../capture/.build/release/mr-capture"
 RES_DIR="$APP/Contents/Resources"
@@ -28,21 +33,25 @@ fi
 
 # Assemble a minimal .app bundle (idempotent: overwrite on re-run).
 mkdir -p "$APP/Contents/MacOS"
-cp -f "$BIN" "$APP/Contents/MacOS/mrBar"
-chmod +x "$APP/Contents/MacOS/mrBar"
+cp -f "$BIN" "$APP/Contents/MacOS/Oatmeal"
+chmod +x "$APP/Contents/MacOS/Oatmeal"
 cp -f "$(pwd)/Info.plist" "$APP/Contents/Info.plist"
 
+# Bundle the new app icon (BRAND-2): Finder reads it via CFBundleIconFile.
+mkdir -p "$RES_DIR"
+cp -f "$(pwd)/../assets/branding/app.icns" "$RES_DIR/app.icns"
+
 # Copy the SwiftPM resource bundle into Contents/Resources/. SwiftPM emits the
-# bundled PNGs (menu-bar icon, logo) as a separate `mrBar_mrBar.bundle` that is
+# bundled PNGs (menu-bar icon, logo) as a separate `Oatmeal_Oatmeal.bundle` that is
 # NOT inside the .app by default; Bundle.module resolves it via
 # Bundle.main.resourceURL, so without this copy the app Fatal-errors at launch
-# ("unable to find bundle named mrBar_mrBar") and shows no icon. Guarded because
+# ("unable to find bundle named Oatmeal_Oatmeal") and shows no icon. Guarded because
 # a resource-less build may not emit it.
-RES_BUNDLE="$(pwd)/.build/release/mrBar_mrBar.bundle"
+RES_BUNDLE="$(pwd)/.build/release/Oatmeal_Oatmeal.bundle"
 if [[ -d "$RES_BUNDLE" ]]; then
   mkdir -p "$RES_DIR"
-  rm -rf "$RES_DIR/mrBar_mrBar.bundle"   # keep re-runs idempotent: cp -R into an existing dir double-nests it
-  cp -R "$RES_BUNDLE" "$RES_DIR/mrBar_mrBar.bundle"
+  rm -rf "$RES_DIR/Oatmeal_Oatmeal.bundle"   # keep re-runs idempotent: cp -R into an existing dir double-nests it
+  cp -R "$RES_BUNDLE" "$RES_DIR/Oatmeal_Oatmeal.bundle"
   echo "embedded SwiftPM resource bundle in $RES_DIR"
 else
   echo "WARN: no SwiftPM resource bundle at $RES_BUNDLE — app will crash at launch (missing icon resources)."
@@ -65,5 +74,5 @@ fi
 # Adhoc codesign the bundle (deep: no embedded frameworks, but harmless).
 codesign --force --deep --sign - "$APP"
 
-echo "installed mrBar.app at $APP"
+echo "installed Oatmeal.app at $APP"
 echo "note: drag the .app into /Applications to install it."

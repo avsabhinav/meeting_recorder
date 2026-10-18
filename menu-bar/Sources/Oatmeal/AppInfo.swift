@@ -68,7 +68,7 @@ enum AppInfo {
     }
 
     /// The app bundle identifier (used for plist + notifications).
-    static var bundleID: String { "com.local.mrBar" }
+    static var bundleID: String { "com.oatmeal.app" }
 
     /// Synchronously run `/usr/bin/env which <name>`; return the trimmed stdout
     /// path on exit 0, else nil. (PATH lookup for a CLI not installed here.)

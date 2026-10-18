@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build mrBar into a signed-release binary (MB-SW1 scaffold; no Info.plist yet —
+# Build Oatmeal into a signed-release binary (MB-SW1 scaffold; no Info.plist yet —
 # added with the AppKit menu-bar app in later tasks).
 #
 # Usage: ./build.sh
-# Produces: menu-bar/.build/release/mrBar
+# Produces: menu-bar/.build/release/Oatmeal
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -26,7 +26,7 @@ if ! touch "$HOME/Library/org.swift.swiftpm/.probe" 2>/dev/null \
 fi
 rm -f "$HOME/Library/org.swift.swiftpm/.probe" "${TMPDIR:-/tmp}/.probe" 2>/dev/null || true
 
-BIN=".build/release/mrBar"
+BIN=".build/release/Oatmeal"
 
 echo "==> swift build -c release"
 # --disable-sandbox: needed when run inside the DSH tool sandbox (sandbox-exec is

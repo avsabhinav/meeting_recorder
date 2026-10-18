@@ -36,5 +36,5 @@ jobs:
       - name: Build mr-capture
         run: cd capture && ./build.sh
 
-      - name: Build mrBar and run tests
+      - name: Build Oatmeal and run tests
         run: cd menu-bar && ./build.sh && swift test --disable-sandbox

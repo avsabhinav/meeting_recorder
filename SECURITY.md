@@ -25,7 +25,7 @@ The repository does not contain — and should never commit — any recordings, 
 ## Code signing & permissions
 
 - `mr-capture` is **adhoc-signed** (no Developer ID / notarization) and embeds usage descriptions for the two macOS TCC permissions it requires: **Microphone** and **System Audio Recording** (macOS 14.2+). You grant both the first time a capture starts.
-- If you run captures from the `mrBar` menu-bar app, the app is the responsible process for the TCC prompts.
+- If you run captures from the `Oatmeal` menu-bar app, the app is the responsible process for the TCC prompts.
 
 Because the binary is adhoc-signed, verify what you run: the source is in this repo (`capture/`), and you can rebuild it yourself with `cd capture && ./build.sh`.
 

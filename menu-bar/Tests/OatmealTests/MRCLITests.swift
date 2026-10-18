@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import mrBar
+@testable import Oatmeal
 
 final class MRCLITests: XCTestCase {
 

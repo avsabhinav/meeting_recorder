@@ -42,6 +42,11 @@ nohup.out
 # writeups). Kept on disk for development but not shipped to the public repo;
 # only the user-facing docs under docs/ are tracked.
 /developers/
+/docs/backlog/
+
+# Local agent-orientation map (deliberately not shipped to the public repo).
+# Read during local development sessions; kept with the working tree only.
+/AGENTS.md
 
 # demo outputs
 examples/demo/output/

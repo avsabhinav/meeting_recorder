@@ -105,8 +105,8 @@ The distributable is a self-contained `.app` inside a DMG, built by
   `mlx_whisper`). `make_dmg.sh` **re-freezes from source first**, so a DMG can
   never embed a stale binary.
 - **Self-contained app:** `menu-bar/install.sh` copies the frozen CLI tree into
-  `mrBar.app/Contents/Resources/mr-cli/` and the `mr-capture` helper into
-  `mrBar.app/Contents/Resources/mr-capture`, then adhoc-signs. The app resolves
+  `Oatmeal.app/Contents/Resources/mr-cli/` and the `mr-capture` helper into
+  `Oatmeal.app/Contents/Resources/mr-capture`, then adhoc-signs. The app resolves
   its own CLI (bundled frozen binary first, then `mr` on PATH, then
   `MR_PYTHON`) and sets `MR_CAPTURE_BIN` internally, so a bundled install needs
   no `PATH`/venv/`launchctl` wiring.
@@ -114,7 +114,7 @@ The distributable is a self-contained `.app` inside a DMG, built by
   branch (pipeline step 2) is mandatory — shipping a frozen binary built before
   that branch existed was the root cause of the "recording saved but no
   transcript" bug.
-- The DMG holds **only** `mrBar.app` + an Applications shortcut
+- The DMG holds **only** `Oatmeal.app` + an Applications shortcut
   (`packaging/make_dmg.sh`, PKG-BUNDLE/5). See `docs/installing.md`.
 
 ## Verifiable acceptance (commands)

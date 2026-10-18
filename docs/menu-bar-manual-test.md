@@ -5,13 +5,13 @@
 > by a person (it has no CLI surface for the actions under test), and the start/stop
 > steps (Steps 3–4) must be performed on a real Mac with a working mic and speakers.
 
-This is the **manual verification for the menu-bar app (`mrBar`)**, the UI front-end
+This is the **manual verification for the menu-bar app (`Oatmeal`)**, the UI front-end
 for Epic MB. The CLI it drives (`mr`) is already covered by the production test in
 [`docs/simulated-test-production.md`](simulated-test-production.md) — this doc is
 specifically about the **app**: its menu-bar icon, its dropdown actions, and the
 first-run permissions that now attach to *the app* rather than to a Terminal.
 
-`mrBar` is a thin shell around the `mr` CLI. It **only shells out to `mr`** (it never
+`Oatmeal` is a thin shell around the `mr` CLI. It **only shells out to `mr`** (it never
 spawns `mr-capture` and never reads/writes the config or state files itself) and
 **never polls** — the menu and icon are rebuilt only each time you open the menu
 (`NSMenu` `menuWillOpen`), so a state change (recording, transcription) shows up the
@@ -21,16 +21,19 @@ moment you click the icon, not on a timer.
 
 End-to-end, the done-bar for the menu-bar app:
 
-1. **Icon in the menu bar** — the `mic.fill` icon renders; it is **grayscale (idle)**
-   when `mr status` reports no recording and **red (live)** when a capture is active,
-   including the **stale-pidfile → idle** case (a leftover state file with a dead pid
-   must read as idle, never as a stuck red icon).
+1. **Icon in the menu bar** — the menu-bar icon **changes with state**: it is the `icon-white`
+   **template glyph** when idle (not recording) and swaps to the distinct full-color
+   `icon-recording` glyph while recording, so it clearly reads "recording" and a user knows to
+   click it to stop. The OS also shows its own **orange recording indicator**. The **stale-pidfile → idle**
+   case must read as idle (a leftover state file with a dead pid must never leave a "recording"
+   cue behind).
 2. **Start Recording** — spawns a capture identical to the CLI `mr start` (same
-   `mr-capture`, same two-track recording) and the icon flips to **live (red)**.
+   `mr-capture`, same two-track recording) and the menu-bar icon **swaps to the full-color
+   `icon-recording` glyph** (the OS's separate orange recording indicator also appears).
 3. **Stop Recording & Transcribe** — triggers the `mr stop`-equivalent; transcription
    runs; the **macOS completion notification** fires when the transcript is written;
-   and the icon returns to **idle immediately** on stop — *not* after transcription
-   finishes (a 1–3 min transcription must never leave a red "live" icon behind).
+   and the OS recording indicator clears **immediately** on stop — *not* after transcription
+   finishes (a 1–3 min transcription must never leave a recording cue behind).
 4. **Transcribing: section** — while a transcription is in flight, opening the menu
    shows a disabled **Transcribing:** section with the session `stamp — transcribing…`;
    it is absent before and clears once the transcript is done.
@@ -38,7 +41,7 @@ End-to-end, the done-bar for the menu-bar app:
    the new root, and existing files are **not moved** (the confirmation copy says so).
 6. **First-run TCC permissions** — Microphone + System Audio Recording are granted with
    the **app** (launched from the menu bar) as the responsible process — attribution to
-   `mrBar`, not to a Terminal or a keyboard shortcut.
+   `Oatmeal`, not to a Terminal or a keyboard shortcut.
 
 ## Setup / prerequisites
 
@@ -50,7 +53,7 @@ All commands run from the repo root (`meeting recorder/`).
    cd menu-bar && ./install.sh
    ```
 
-   This produces `menu-bar/.build/Release/mrBar.app` (the release binary + `Info.plist`
+   This produces `menu-bar/.build/Release/Oatmeal.app` (the release binary + `Info.plist`
    with `LSUIElement` and the usage strings, adhoc-signed). To keep it out of the
    build tree, **drag the `.app` into `/Applications`** (or just launch it in place).
 
@@ -74,9 +77,9 @@ All commands run from the repo root (`meeting recorder/`).
    ```sh
    # From the repo root, with option (b):
    MR_PYTHON="$PWD/spike/.venv/bin/python" \
-     menu-bar/.build/Release/mrBar.app/Contents/MacOS/mrBar &
+     menu-bar/.build/Release/Oatmeal.app/Contents/MacOS/Oatmeal &
    # ...or, if you chose (a) and `mr` is on PATH, just:
-   open menu-bar/.build/Release/mrBar.app
+   open menu-bar/.build/Release/Oatmeal.app
    ```
 
    (If you see the disabled `mr CLI not found (set MR_PYTHON)` row, you are here — fix
@@ -102,8 +105,9 @@ All commands run from the repo root (`meeting recorder/`).
 ### Step 1 — launch, icon, and initial menu
 
 1. Launch the app (Step 2 of the setup).
-2. **Confirm the `mic.fill` icon appears in the menu bar** (top-right, with the other
-   status icons) — and that **no Dock icon** appears (`LSUIElement` / `.accessory`).
+2. **Confirm the menu-bar icon (the `icon-white` template glyph, idle state) appears** in the
+   menu bar (top-right, with the other status icons) — and that **no Dock icon** appears
+   (`LSUIElement` / `.accessory`).
 3. **Click the icon.** The dropdown should show, in order:
    - **Start Recording** — enabled (grey text) when idle.
    - **Stop Recording & Transcribe** — disabled when idle.
@@ -134,8 +138,9 @@ All commands run from the repo root (`meeting recorder/`).
 ### Step 3 — Start Recording (and cross-check the CLI)
 
 1. Open the menu → **Start Recording**.
-2. **The icon turns red (live).** The menu should now show **Stop enabled / Start
-   disabled** on the next open.
+2. **Start recording.** The menu-bar icon **swaps to the full-color `icon-recording`
+   glyph** (the OS also shows its orange recording indicator near Control Center). The menu
+   should now show **Stop enabled / Start disabled** on the next open.
 3. **Cross-check** from a terminal that a real capture is running and identical to the
    CLI path: `mr status` → `recording: yes` (with a `pid`, `out_dir` under the scratch
    root, and a `stamp`).
@@ -146,9 +151,9 @@ All commands run from the repo root (`meeting recorder/`).
 ### Step 4 — Stop, watch the icon, and watch the Transcribing section
 
 1. Open the menu → **Stop Recording & Transcribe**.
-2. **The icon flips back to idle (grayscale) immediately** — *before* transcription
-   finishes. This is the key MB behavior: a long (1–3 min) transcription must not keep
-   the icon red.
+2. **The menu-bar icon swaps back to the `icon-white` template glyph, and the OS recording
+   indicator clears, immediately** — *before* transcription finishes. This is the key MB behavior: a
+   long (1–3 min) transcription must not keep a recording cue showing.
 3. **Within a few seconds**, open the menu again: a **Transcribing:** section should be
    visible — a disabled header `Transcribing:` with a line like
    `<stamp> — transcribing…`. (It reads the `<out_root>/.state/transcribing.json`
@@ -195,7 +200,7 @@ All commands run from the repo root (`meeting recorder/`).
 
 If this is your first run of the app, the **Microphone** and **System Audio
 Recording** TCC prompts should appear **when the app starts a capture** (Step 3) —
-i.e. attributed to **`mrBar`** (or the `mr-capture` helper it launches), **not** to a
+i.e. attributed to **`Oatmeal`** (or the `mr-capture` helper it launches), **not** to a
 Terminal or a keyboard shortcut. Note which app each prompt names. If a prompt was
 denied, re-grant per
 [docs/permissions-troubleshooting.md](permissions-troubleshooting.md) and restart the
@@ -204,13 +209,14 @@ is the menu-bar app, so a previously-allowed Terminal grant may not carry over.)
 
 ## Done bar
 
-- [ ] `mic.fill` icon appears in the menu bar; **no Dock icon** (`LSUIElement`).
-- [ ] Icon **idle (grayscale)** when no capture, **red (live)** while recording —
-      mirrors `mr status`; **stale-pidfile reads as idle**, not stuck-red.
-- [ ] **Start Recording** spawns a real capture (identical to CLI `mr start`); icon goes
-      live; `mr status` shows `recording: yes`.
-- [ ] **Stop** triggers `mr stop`-equivalent; **icon flips idle immediately**, not after
-      the 1–3 min transcription.
+- [ ] `icon-white` template glyph appears in the menu bar; **no Dock icon** (`LSUIElement`).
+- [ ] Icon **is `icon-white` (template) when idle and swaps to the full-color `icon-recording`
+      glyph while recording** (the OS also shows its orange recording indicator);
+      **stale-pidfile reads as idle** — no lingering recording cue.
+- [ ] **Start Recording** spawns a real capture (identical to CLI `mr start`); the menu-bar
+      icon swaps to `icon-recording`; `mr status` shows `recording: yes`.
+- [ ] **Stop** triggers `mr stop`-equivalent; **the menu-bar icon swaps back to `icon-white`
+      immediately**, not after the 1–3 min transcription.
 - [ ] **macOS notification** (`Recording "<stamp>" transcribed -> <stamp>.md`) fires
       when the transcript is written.
 - [ ] **Transcribing:** section appears (with `stamp — transcribing…`) while transcribing
@@ -219,7 +225,7 @@ is the menu-bar app, so a previously-allowed Terminal grant may not carry over.)
       new root; **existing files are not moved** (confirmation copy says so).
 - [ ] **Open Folder ▸ Recordings / Transcripts** open the correct folders in Finder.
 - [ ] **First-run TCC** (Microphone + System Audio Recording) granted, attributed to the
-      app (`mrBar`/helper), not a Terminal/shortcut.
+      app (`Oatmeal`/helper), not a Terminal/shortcut.
 - [ ] Transcript at the new root passes `verify_transcript.py` (You/Them + timing).
 
 ## What to report
@@ -230,12 +236,13 @@ Mirror the P2.7 report, plus the menu-bar specifics:
   `OVERALL:` line.
 - `meta.json` `samples_written` for **both** tracks (mic + system) and the capture
   duration — confirms the app's capture actually recorded audio.
-- **Icon behavior:** idle vs live transitions, and whether the icon returned to idle
-  **immediately** on stop (before the transcript finished).
+- **Icon behavior:** the menu-bar icon swapping from `icon-white` to `icon-recording` on
+  start and back on stop (**immediately**, before the transcript finishes), plus the OS
+  recording indicator appearing/clearing.
 - **Transcribing: section:** did it appear with the stamp, and did it clear when done?
 - **Notification:** did the macOS `Recording … transcribed -> …` notification appear?
 - **Permission-prompt attribution:** for each TCC prompt, *which app* it named
-  (`mrBar` vs helper vs Terminal/shortcut), and whether any were denied.
+  (`Oatmeal` vs helper vs Terminal/shortcut), and whether any were denied.
 - Exit codes of each `mr` command the app ran (all should be `0`; a one-off `3` only
   if the model wasn't yet cached).
 - Any **attribution, echo, or hallucination** issues in the transcript — quote the

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import mrBar
+@testable import Oatmeal
 
 /// Unit tests for the pure "Check Active Transcriptions…" display logic
 /// (MB-DISPLAY/D3) — no AppKit, no `StatusItemController` instantiation.

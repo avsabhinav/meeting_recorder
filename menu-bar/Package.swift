@@ -2,24 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "mrBar",
+    name: "Oatmeal",
     platforms: [.macOS("14.2")],
     products: [
-        .executable(name: "mrBar", targets: ["mrBar"])
+        .executable(name: "Oatmeal", targets: ["Oatmeal"])
     ],
     targets: [
         .executableTarget(
-            name: "mrBar",
-            path: "Sources/mrBar",
+            name: "Oatmeal",
+            path: "Sources/Oatmeal",
             resources: [
                 .copy("Resources/icon-white.png"),
-                .copy("Resources/logo-round.png")
+                .copy("Resources/icon-recording.png")
             ]
         ),
         .testTarget(
-            name: "mrBarTests",
-            dependencies: ["mrBar"],
-            path: "Tests/mrBarTests"
+            name: "OatmealTests",
+            dependencies: ["Oatmeal"],
+            path: "Tests/OatmealTests"
         )
     ]
 )

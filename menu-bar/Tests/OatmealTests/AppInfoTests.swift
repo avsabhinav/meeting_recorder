@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import mrBar
+@testable import Oatmeal
 
 final class AppInfoTests: XCTestCase {
 
@@ -8,7 +8,7 @@ final class AppInfoTests: XCTestCase {
     /// frozen CLI entry binary (e.g. Contents/Resources/mr-cli/mr-cli).
     private func makeExecutableStub() throws -> String {
         let dir = FileManager.default.temporaryDirectory
-        let file = dir.appendingPathComponent("mrBarAppInfoTest-\(UUID().uuidString)/mr-cli")
+        let file = dir.appendingPathComponent("OatmealAppInfoTest-\(UUID().uuidString)/mr-cli")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try "stub".write(to: file, atomically: true, encoding: .utf8)

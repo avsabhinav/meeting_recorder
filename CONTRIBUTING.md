@@ -46,7 +46,7 @@ cd menu-bar && swift test --disable-sandbox
 
 - `mr/` — Python package: `mr` CLI and core (capture, transcribe, merge, output)
 - `capture/` — SwiftPM package that builds the `mr-capture` recording helper
-- `menu-bar/` — SwiftPM AppKit app that builds the `mrBar` menu-bar app
+- `menu-bar/` — SwiftPM AppKit app that builds the `Oatmeal` menu-bar app
 - `tests/` — pytest suite for the Python core (transcriber mocked)
 - `examples/` — sample aligned WAVs and a generated transcript
 - `docs/` — architecture notes, permissions & troubleshooting, manual-test results
@@ -59,7 +59,7 @@ The Phase 0 spike was archived out of the repo; for design decisions, read [docs
 2. Open a pull request against `main`.
 3. CI must pass before a PR can be merged.
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on an Apple Silicon macOS 15 runner on every push to `main` and on every PR: it installs the dev dependencies, runs `ruff check mr tests` and `pytest`, builds `mr-capture` and `mrBar`, and runs the menu-bar XCTest suite.
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on an Apple Silicon macOS 15 runner on every push to `main` and on every PR: it installs the dev dependencies, runs `ruff check mr tests` and `pytest`, builds `mr-capture` and `Oatmeal`, and runs the menu-bar XCTest suite.
 
 Please keep PRs small and focused — one fix or one feature per PR makes review much easier.
 

@@ -2,8 +2,10 @@ import AppKit
 
 /// Owns the `NSStatusItem` and drives all UI state (MB-SW3).
 ///
-/// - Icon: `icon-white` template image — grayscale when idle, swapped to the
-///   full-color `logo-round` highlight while live (no tinting).
+/// - Icon: a two-state swap — idle shows the `icon-white` template glyph,
+///   recording shows the distinct full-color `icon-recording` image (non-template).
+///   The OS's separate recording privacy indicator also appears while recording
+///   (kept as-is; never hidden).
 /// - Refresh is **lazy**: the button-click handler (`togglePressed`) rebuilds
 ///   the menu and icon from the locally-tracked live state — no subprocess on
 ///   the open path, no timers/polling.
@@ -57,42 +59,31 @@ final class StatusItemController: NSObject {
 
     // MARK: - Icon
 
-    /// Sets the status-item icon to idle (`icon-white` template glyph) or live (`logo-round`
-    /// full-color highlighted image, no tinting).
+    /// Sets the status-item icon to the state-appropriate glyph.
+    /// - Idle: the `icon-white` template image (AppKit tints it to match the
+    ///   menu-bar appearance, giving the built-in active/click highlight).
+    /// - Recording: the distinct full-color `icon-recording` image, rendered
+    ///   non-template so its colors show as drawn. (The OS's separate
+    ///   recording privacy indicator also appears; it is kept, never hidden.)
     private func setLive(_ live: Bool) {
         isLiveRecording = live
         guard let button = statusItem.button else { return }
-        if live {
-            // Live: logo-round already has its own color (gradient circle + glyph) — shown
-            // as-is, NOT a template image, NOT tinted, so the full-color highlight shows.
-            if let url = Bundle.module.url(forResource: "logo-round", withExtension: "png"),
-               let image = NSImage(contentsOf: url) {
-                image.isTemplate = false
-                image.size = NSSize(width: 18, height: 18)
-                button.image = image
-            } else {
-                button.image = NSImage(
-                    systemSymbolName: "mic.fill",
-                    accessibilityDescription: "Recording"
-                )
-            }
-            button.contentTintColor = nil
+        // Two-state swap: `icon-white` (template) when idle, `icon-recording`
+        // (full-color, non-template) while recording. No tint is applied in
+        // either state — template rendering tints the idle glyph itself.
+        let resourceName = live ? "icon-recording" : "icon-white"
+        if let url = Bundle.module.url(forResource: resourceName, withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            image.isTemplate = !live
+            image.size = NSSize(width: 18, height: 18)
+            button.image = image
         } else {
-            // Idle: icon-white is a template image — AppKit colors it to match the current
-            // menu-bar appearance (dark in light mode, light in dark mode), no tint applied.
-            if let url = Bundle.module.url(forResource: "icon-white", withExtension: "png"),
-               let image = NSImage(contentsOf: url) {
-                image.isTemplate = true
-                image.size = NSSize(width: 18, height: 18)
-                button.image = image
-            } else {
-                button.image = NSImage(
-                    systemSymbolName: "mic.fill",
-                    accessibilityDescription: "Idle"
-                )
-            }
-            button.contentTintColor = nil
+            button.image = NSImage(
+                systemSymbolName: "mic.fill",
+                accessibilityDescription: live ? "Recording" : "Idle"
+            )
         }
+        button.contentTintColor = nil
         button.image?.accessibilityDescription = live ? "Recording" : "Idle"
         button.needsDisplay = true
     }

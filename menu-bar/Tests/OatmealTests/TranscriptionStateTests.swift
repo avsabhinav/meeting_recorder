@@ -1,13 +1,13 @@
 import Foundation
 import XCTest
-@testable import mrBar
+@testable import Oatmeal
 
 final class TranscriptionStateTests: XCTestCase {
     private var tmpDir: URL!
 
     override func setUpWithError() throws {
         tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mrBarTests-\(UUID().uuidString)")
+            .appendingPathComponent("OatmealTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
     }
 

@@ -6,10 +6,10 @@
 # What it does:
 #   1. Freezes the mr CLI from source (packaging/freeze_cli.sh) so the bundled
 #      binary is always current — a stale dist-freeze must never ship.
-#   2. Builds mrBar.app (with the embedded frozen CLI + mr-capture inside)
+#   2. Builds Oatmeal.app (with the embedded frozen CLI + mr-capture inside)
 #      via menu-bar/install.sh
 #   3. Stages a DMG volume containing ONLY:
-#        mrBar.app
+#        Oatmeal.app
 #        Applications -> /Applications   (drag-to-install affordance)
 #      (single-drag; PKG-BUNDLE/5)
 #   4. Creates dist/Oatmeal-<VERSION>.dmg with hdiutil (UDZO, -ov), with a
@@ -57,10 +57,10 @@ mkdir -p "$VOL"
 echo "==> Freezing the mr CLI from source (packaging/freeze_cli.sh)"
 bash packaging/freeze_cli.sh
 
-echo "==> Building mrBar.app (menu-bar/install.sh; embeds the frozen CLI + mr-capture)"
+echo "==> Building Oatmeal.app (menu-bar/install.sh; embeds the frozen CLI + mr-capture)"
 bash menu-bar/install.sh
 
-APP_SRC="$REPO_ROOT/menu-bar/.build/Release/mrBar.app"
+APP_SRC="$REPO_ROOT/menu-bar/.build/Release/Oatmeal.app"
 
 if [[ ! -d "$APP_SRC" ]]; then
   echo "make_dmg.sh: missing $APP_SRC (did menu-bar/install.sh succeed?)" >&2
@@ -68,9 +68,9 @@ if [[ ! -d "$APP_SRC" ]]; then
 fi
 
 # --- 2. Assemble the volume staging directory. ------------------------------
-# The volume now contains ONLY mrBar.app (with the embedded frozen CLI +
+# The volume now contains ONLY Oatmeal.app (with the embedded frozen CLI +
 # mr-capture inside it) and the Applications symlink — single-drag; PKG-BUNDLE/5.
-cp -R "$APP_SRC" "$VOL/mrBar.app"
+cp -R "$APP_SRC" "$VOL/Oatmeal.app"
 
 # Drag-to-install affordance.
 ln -s /Applications "$VOL/Applications"
@@ -110,7 +110,7 @@ hdiutil attach "$raw_image" -mountpoint "$MOUNT_PT" -nobrowse >/dev/null
 ditto "$VOL" "$MOUNT_PT"
 
 # Open + lay out the mounted window so double-clicking the DMG shows the
-# classic "drag mrBar.app to Applications" window immediately.
+# classic "drag Oatmeal.app to Applications" window immediately.
 open "$MOUNT_PT"
 osascript -e 'tell application "Finder" to activate' \
   -e 'tell application "Finder" to set the bounds of the front window to {50, 50, 520, 480}' \
