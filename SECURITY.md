@@ -2,7 +2,7 @@
 
 ## Security model
 
-meeting-recorder is **local-first by design**:
+Oatmeal is **local-first by design**:
 
 - **Audio capture** happens on your machine, driven by the local `mr-capture` helper.
 - **Transcription** runs locally with [mlx-whisper]; the CLI transcribes from the local Hugging Face cache only (`HF_HUB_OFFLINE=1`).

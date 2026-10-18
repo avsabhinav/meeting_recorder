@@ -1,6 +1,6 @@
 # Contributing
 
-Welcome! meeting-recorder is a local-first macOS tool: record a 1:1 call (mic + system audio) and transcribe it locally into an attributed Markdown transcript. Contributions are welcome.
+Welcome! Oatmeal is a local-first macOS tool: record a 1:1 call (mic + system audio) and transcribe it locally into an attributed Markdown transcript. Contributions are welcome.
 
 ## Prerequisites
 
