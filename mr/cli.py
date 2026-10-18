@@ -93,8 +93,18 @@ def _spawn_transcription(stamp: str, out_dir: str, *, json_sidecar: bool = False
     stdio discarded, so it outlives this short-lived CLI and ``mr stop``
     returns immediately. The worker owns the transcription heartbeat and the
     completion notification. Returns ``True`` if the process was spawned.
+
+    When frozen (PyInstaller), ``sys.executable`` IS the ``mr-cli`` binary, so
+    the ``-m mr.cli`` prefix is dropped (it would be parsed as an unknown
+    option by the frozen CLI).
     """
-    args = [sys.executable, "-m", "mr.cli", "_transcribe", stamp, out_dir]
+    frozen = getattr(sys, "frozen", False)
+    if frozen:
+        # Frozen (PyInstaller): sys.executable IS the mr CLI; do not prepend
+        # `-m mr.cli` (which the frozen binary treats as an unknown option).
+        args = [sys.executable, "_transcribe", stamp, out_dir]
+    else:
+        args = [sys.executable, "-m", "mr.cli", "_transcribe", stamp, out_dir]
     if json_sidecar:
         args.append("--json")
     try:

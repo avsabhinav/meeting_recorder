@@ -12,6 +12,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -230,6 +231,23 @@ def test_spawn_transcription_detached(monkeypatch) -> None:
     assert recorded["stdout"] is subprocess.DEVNULL
     assert recorded["stderr"] is subprocess.DEVNULL
     assert recorded["start_new_session"] is True
+
+
+def test_spawn_transcription_frozen_no_module_prefix(monkeypatch) -> None:
+    """PKG-BUNDLE/4: a frozen binary must NOT prepend `-m mr.cli` when
+    re-spawning the background _transcribe worker."""
+    recorded: dict[str, object] = {}
+
+    class _StubPopen:
+        def __init__(self, argv: object, **kwargs: object) -> None:
+            recorded["argv"] = argv
+            recorded.update(kwargs)
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(mr.cli.subprocess, "Popen", _StubPopen)
+
+    assert mr.cli._spawn_transcription("s1", "/tmp/out") is True
+    assert recorded["argv"] == [sys.executable, "_transcribe", "s1", "/tmp/out"]
 
 
 def test_spawn_transcription_failure_returns_false(monkeypatch) -> None:
