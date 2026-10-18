@@ -8,14 +8,14 @@ final class MRCLITests: XCTestCase {
                          canned: (stdout: String, exit: Int32)) -> MRCLI {
         var cli = MRCLI()
         cli.invocation = invocation
-        cli.runner = ProcessRunner { exe, args in
-            MRCLITests.lastCall = (exe, args)
+        cli.runner = ProcessRunner { exe, args, env in
+            MRCLITests.lastCall = (exe, args, env)
             return canned
         }
         return cli
     }
 
-    private static var lastCall: (exe: URL, args: [String])?
+    private static var lastCall: (exe: URL, args: [String], env: [String: String])?
 
     func testExecutableInvocationNoPrefix() throws {
         let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
@@ -69,6 +69,24 @@ final class MRCLITests: XCTestCase {
         let (out, exit) = try cli.setOutRoot("/no/such/dir")
         XCTAssertEqual(out, "bad path")
         XCTAssertEqual(exit, 2)
+    }
+
+    func testBundledCaptureBinPassesEnvToRunner() throws {
+        var cli = makeCLI(invocation: .executable("/x/mr"),
+                          canned: ("recording: no", 0))
+        cli.bundledCaptureBin = "/fake/bundle/mr-capture"
+        _ = try cli.status()
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertEqual(call.env, ["MR_CAPTURE_BIN": "/fake/bundle/mr-capture"])
+    }
+
+    func testNoBundledCaptureBinPassesEmptyEnv() throws {
+        var cli = makeCLI(invocation: .executable("/x/mr"),
+                          canned: ("recording: no", 0))
+        cli.bundledCaptureBin = nil
+        _ = try cli.status()
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertTrue(call.env.isEmpty)
     }
 
     func testMrUnavailableWhenNoInvocation() throws {

@@ -4,9 +4,10 @@ import Foundation
 /// this, so tests can inject a fake runner that returns canned (stdout, exit)
 /// pairs without touching the real `mr` or the filesystem.
 struct ProcessRunner {
-    /// Runs `executable` with `args`, returning trimmed stdout + exit code.
+    /// Runs `executable` with `args`, applying `env` to the child, returning
+    /// trimmed stdout + exit code.
     /// A non-zero exit is NOT an error — it is returned, not thrown.
-    var run: (URL, [String]) throws -> (stdout: String, exit: Int32)
+    var run: (URL, [String], [String: String]) throws -> (stdout: String, exit: Int32)
 
     /// Real implementation via Foundation `Process`.
     static let `default` = ProcessRunner(run: ProcessRunner.realRun)
@@ -15,10 +16,17 @@ struct ProcessRunner {
     /// generous. On timeout the child is killed and an error is thrown.
     static let timeoutSeconds: TimeInterval = 120
 
-    static func realRun(_ exe: URL, _ args: [String]) throws -> (String, Int32) {
+    static func realRun(_ exe: URL, _ args: [String], _ env: [String: String]) throws -> (String, Int32) {
         let process = Process()
         process.executableURL = exe
         process.arguments = args
+        if !env.isEmpty {
+            // Merge INTO the inherited env — assigning a bare dict to
+            // process.environment would REPLACE the whole environment.
+            var merged = ProcessInfo.processInfo.environment
+            for (k, v) in env { merged[k] = v }
+            process.environment = merged
+        }
         let stdoutPipe = Pipe()
         process.standardOutput = stdoutPipe
         process.standardError = FileHandle.nullDevice
@@ -54,6 +62,10 @@ struct MRCLI {
     var runner: ProcessRunner = .default
     var invocation: MRInvocation? = AppInfo.resolveMrInvocation()
 
+    /// Bundled mr-capture path inside this app's Resources (PKG-BUNDLE/3), or
+    /// nil when not running as a bundled install. Injected for tests.
+    var bundledCaptureBin: String? = AppInfo.bundledCaptureBinPath()
+
     func status() throws -> (out: String, exit: Int32) { try invoke(["status"]) }
     func start() throws -> (out: String, exit: Int32) {
         try start(withContextJSON: nil)
@@ -85,7 +97,13 @@ struct MRCLI {
         case .executable(let p): (URL(fileURLWithPath: p), [])
         case .python(let p): (URL(fileURLWithPath: p), ["-m", "mr.cli"])
         }
-        return try runner.run(exe, prefix + args)
+        let env: [String: String]
+        if let bin = bundledCaptureBin {
+            env = ["MR_CAPTURE_BIN": bin]
+        } else {
+            env = [:]
+        }
+        return try runner.run(exe, prefix + args, env)
     }
 
     /// Builds the `--context-json` payload for `mr start` (CAL-L3). Pure and

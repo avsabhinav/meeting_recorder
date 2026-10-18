@@ -2,8 +2,8 @@ import AppKit
 
 /// Owns the `NSStatusItem` and drives all UI state (MB-SW3).
 ///
-/// - Icon: `mic.fill` template image — grayscale when idle, tinted
-///   `systemRed` while live (no custom assets; SF symbols only).
+/// - Icon: `icon-white` template image — grayscale when idle, swapped to the
+///   full-color `logo-round` highlight while live (no tinting).
 /// - Refresh is **lazy**: the button-click handler (`togglePressed`) rebuilds
 ///   the menu and icon from the locally-tracked live state — no subprocess on
 ///   the open path, no timers/polling.
@@ -57,15 +57,43 @@ final class StatusItemController: NSObject {
 
     // MARK: - Icon
 
-    /// Sets the status-item icon to idle (grayscale) or live (red mic).
+    /// Sets the status-item icon to idle (`icon-white` template glyph) or live (`logo-round`
+    /// full-color highlighted image, no tinting).
     private func setLive(_ live: Bool) {
         isLiveRecording = live
         guard let button = statusItem.button else { return }
-        button.image = NSImage(
-            systemSymbolName: "mic.fill",
-            accessibilityDescription: live ? "Recording" : "Idle"
-        )
-        button.contentTintColor = live ? .systemRed : nil
+        if live {
+            // Live: logo-round already has its own color (gradient circle + glyph) — shown
+            // as-is, NOT a template image, NOT tinted, so the full-color highlight shows.
+            if let url = Bundle.module.url(forResource: "logo-round", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                image.isTemplate = false
+                image.size = NSSize(width: 18, height: 18)
+                button.image = image
+            } else {
+                button.image = NSImage(
+                    systemSymbolName: "mic.fill",
+                    accessibilityDescription: "Recording"
+                )
+            }
+            button.contentTintColor = nil
+        } else {
+            // Idle: icon-white is a template image — AppKit colors it to match the current
+            // menu-bar appearance (dark in light mode, light in dark mode), no tint applied.
+            if let url = Bundle.module.url(forResource: "icon-white", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                image.isTemplate = true
+                image.size = NSSize(width: 18, height: 18)
+                button.image = image
+            } else {
+                button.image = NSImage(
+                    systemSymbolName: "mic.fill",
+                    accessibilityDescription: "Idle"
+                )
+            }
+            button.contentTintColor = nil
+        }
+        button.image?.accessibilityDescription = live ? "Recording" : "Idle"
         button.needsDisplay = true
     }
 

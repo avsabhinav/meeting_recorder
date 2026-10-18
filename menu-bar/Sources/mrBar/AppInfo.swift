@@ -9,10 +9,34 @@ enum MRInvocation {
 }
 
 enum AppInfo {
+    /// Path to the bundled frozen CLI inside this app's Resources, if the app is
+    /// running as a real bundle (never when running as bare `swift run`/xctest).
+    /// PKG-BUNDLE/2: the highest-precedence candidate; returns nil when not in a
+    /// real bundle or the entry binary is missing/not executable.
+    static func bundledMrCliPath() -> String? {
+        guard let url = Bundle.main.url(forResource: "mr-cli", withExtension: nil,
+                                        subdirectory: nil) else { return nil }
+        let exe = url.appendingPathComponent("mr-cli").path
+        return pathExists(executableAt: exe) ? exe : nil
+    }
+
+    /// Path to the bundled mr-capture helper inside this app's Resources
+    /// (PKG-BUNDLE/3), or nil when not running as a real bundle.
+    static func bundledCaptureBinPath() -> String? {
+        guard let url = Bundle.main.url(forResource: "mr-capture", withExtension: nil) else { return nil }
+        let p = url.path
+        return pathExists(executableAt: p) ? p : nil
+    }
+
     /// Candidates for the `mr` CLI, most-preferred first. Each invocation's
     /// launch path + fixed leading args (e.g. python `["-m","mr.cli"]`).
-    static func mrCandidates() -> [MRInvocation] {
+    static func mrCandidates(bundledMrCliPath: String? = AppInfo.bundledMrCliPath()) -> [MRInvocation] {
         var candidates: [MRInvocation] = []
+        // 0. Highest precedence: the CLI bundled inside this app (PKG-BUNDLE/2).
+        //    Only offered if the entry binary actually exists and is executable.
+        if let p = bundledMrCliPath, pathExists(executableAt: p) {
+            candidates.append(.executable(p))
+        }
         // 1. `mr` on PATH (e.g. an installed console script).
         if let path = which("mr"), !path.isEmpty {
             candidates.append(.executable(path))
