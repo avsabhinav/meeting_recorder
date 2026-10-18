@@ -54,11 +54,14 @@ examples/demo/    # sample aligned WAVs + generated .md
    frontmatter** block rather than prose — the target audience keeps Obsidian
    vaults and queries properties (`title`, `date`, `attendees`, `notes`,
    `duration`, `source`). Context is captured **at start time**: the menu-bar
-   app (planned, EventKit — not shipping yet) hands the event to
+   app (EventKit; shipping) hands the event to
    `mr start --context-json <path>`, which persists `meeting_context.json`
    into `recordings/<stamp>/`; the detached background transcriber reads it
    later, so the transcriber never needs calendar access. EventKit access is
-   owned entirely by the menu-bar app, never by the Python core.
+   owned entirely by the menu-bar app, never by the Python core. In the menu
+   bar this surfaces as a "Start Recording from Calendar…" submenu (CAL-L1/L2/L3);
+   the plain "Start Recording" item works with no calendar and everything
+   degrades gracefully if Calendar permission is denied.
 
 ## Pipeline for one recording
 1. `mr toggle` (idle) → `mr start` → spawn `mr-capture --out ~/Meetings/recordings/<stamp>`
@@ -69,6 +72,14 @@ examples/demo/    # sample aligned WAVs + generated .md
 2. `mr toggle` (active) → `mr stop` → SIGINT `mr-capture` → finalized WAVs + meta.json
    → clear the recording pidfile → spawn a **detached background `mr _transcribe`
    process and return immediately** (a new recording can start right away).
+   `_spawn_transcription` re-launches the *same* interpreter: in a source
+   (venv) install it runs `[sys.executable, "-m", "mr.cli", "_transcribe", …]`,
+   and in the **frozen** (PyInstaller) build — where `sys.executable` IS the
+   `mr-cli` binary — it runs `[sys.executable, "_transcribe", …]` and must NOT
+   prepend `-m mr.cli` (the frozen CLI treats `-m` as an unknown argument). Both
+   spawn with stdio to `/dev/null` and `start_new_session=True`, so the worker
+   outlives `mr stop`. A spawn/crash failure is silent (the worker owns any
+   error reporting).
 3. Background `mr _transcribe` writes the `transcribing.json` heartbeat, then
    `transcribe` both tracks (sequential) → `TranscriptionResult`s.
 4. `merge_transcripts(you, them, dedup_threshold=0.6)` → sorted, deduped segments.
@@ -80,7 +91,31 @@ examples/demo/    # sample aligned WAVs + generated .md
    (omitted if empty), `duration` (`<m>m <s>s`), `source` (`recordings/<stamp>/`)
    — and the JSON sidecar gains a `"context"` key with the raw dict. No context
    → output is identical to the plain path.
-6. `osascript` completion notification, then clear the heartbeat.
+6. The worker clears the `transcribing.json` heartbeat in a `finally` (so it
+   happens on both the success and the model-not-cached paths), then raises the
+   `osascript` completion notification (fail-soft; never blocks or raises).
+
+## Production packaging (menu-bar + DMG)
+
+The distributable is a self-contained `.app` inside a DMG, built by
+`packaging/make_dmg.sh`:
+
+- **Frozen CLI (PyInstaller):** `packaging/freeze_cli.sh` produces a onedir
+  frozen `mr-cli` in `dist-freeze/mr-cli` (PyInstaller 6; collects `mlx`/
+  `mlx_whisper`). `make_dmg.sh` **re-freezes from source first**, so a DMG can
+  never embed a stale binary.
+- **Self-contained app:** `menu-bar/install.sh` copies the frozen CLI tree into
+  `mrBar.app/Contents/Resources/mr-cli/` and the `mr-capture` helper into
+  `mrBar.app/Contents/Resources/mr-capture`, then adhoc-signs. The app resolves
+  its own CLI (bundled frozen binary first, then `mr` on PATH, then
+  `MR_PYTHON`) and sets `MR_CAPTURE_BIN` internally, so a bundled install needs
+  no `PATH`/venv/`launchctl` wiring.
+- Because the bundled app runs a *frozen* CLI, the frozen `_spawn_transcription`
+  branch (pipeline step 2) is mandatory — shipping a frozen binary built before
+  that branch existed was the root cause of the "recording saved but no
+  transcript" bug.
+- The DMG holds **only** `mrBar.app` + an Applications shortcut
+  (`packaging/make_dmg.sh`, PKG-BUNDLE/5). See `docs/installing.md`.
 
 ## Verifiable acceptance (commands)
 - `ruff check mr tests` clean; `pytest -q` green.

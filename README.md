@@ -1,4 +1,6 @@
-# meeting-recorder
+# Oatmeal
+
+![Oatmeal logo](assets/branding/logo-square.png)
 
 A tiny, private macOS tool that records a 1:1 call — your voice and the other
 side's voice — and transcribes it **entirely on your Mac** into a **plain
@@ -323,9 +325,11 @@ Add a Script Command with:
 - Then assign a hotkey (e.g. **⌥⌘R**) to the command.
 
 Prefer a drag-and-drop installer? See
-[docs/installing.md](docs/installing.md) — it covers the DMG install, the
-first-launch Gatekeeper step (right-click → Open), and the terminal `mr`
-command.
+[docs/installing.md](docs/installing.md) — the DMG (`Oatmeal-<version>.dmg`)
+is a single-drag, self-contained install: it contains only `mrBar.app` and an
+Applications shortcut, so you drag the app in and you're done. It also covers
+the first-launch Gatekeeper step (right-click → Open) and the optional
+dev-only terminal `mr` command.
 
 ## Menu-bar app (beta)
 
@@ -340,9 +344,12 @@ menu (no polling).
 
 - **Build + install:** `cd menu-bar && ./install.sh` →
   `menu-bar/.build/Release/mrBar.app` (drag into `/Applications` or launch in place).
-- **Make `mr` reachable:** either put it on `PATH` (`pip install -e .`), or launch the
-  app with `MR_PYTHON=<venv>/bin/python` set (the app resolves `mr` from `PATH` first,
-  then `MR_PYTHON`).
+- **Make `mr` reachable (source/dev builds only):** either put it on `PATH`
+  (`pip install -e .`), or launch the app with `MR_PYTHON=<venv>/bin/python`
+  set (the app resolves `mr` from `PATH` first, then `MR_PYTHON`). The
+  DMG/bundled `mrBar.app` is self-contained — it bundles the `mr` CLI and
+  `mr-capture` and needs none of this; these `PATH` / `MR_PYTHON` notes apply
+  only to a source-build/dev `mrBar`.
 - **Manual test + permissions:** see
   [docs/menu-bar-manual-test.md](docs/menu-bar-manual-test.md) — the app is the
   responsible process for the Microphone / System Audio TCC prompts.
@@ -410,14 +417,13 @@ source: recordings/2026-08-24_1432/
 ---
 ```
 
-**Planned (menu-bar):** the `mrBar` app will gain a **"Start Recording from
-Calendar…"** submenu that lists Apple Calendar events from the last 1 hour
-through the next 2 hours. Picking an event starts a recording with that meeting
-attached as context (it builds the JSON and calls `mr start --context-json`);
-the plain **Start Recording** item keeps working without any calendar, and the
-feature degrades gracefully if Calendar permission is not granted. This part is
-the intended UX and is still being built — it is **not** shipping in the menu-bar
-app today.
+**Menu-bar:** the `mrBar` app has a **"Start Recording from Calendar…"**
+submenu (tag 708) that lists Apple Calendar events from the last 1 hour through
+the next 2 hours. Picking an event starts a recording with that meeting
+attached as context (the app builds the JSON with `mr start --context-json`);
+the **plain Start Recording** item keeps working without any calendar, and the
+feature degrades gracefully if Calendar permission is not granted. EventKit
+access is owned entirely by the menu-bar app (never the Python core).
 
 ## Transcription notes
 
