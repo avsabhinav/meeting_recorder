@@ -21,13 +21,22 @@ class Word:
 
 @dataclass(frozen=True)
 class Segment:
-    """A contiguous attributed utterance."""
+    """A contiguous attributed utterance.
+
+    ``echo_suspected`` marks a ``You`` segment that the merge step believes is
+    residual acoustic echo of concurrent ``Them`` audio. Such segments are
+    omitted from the Markdown transcript but kept in the JSON sidecar: the
+    dedup heuristic is fallible, and a faithful transcript must never delete
+    speech unrecoverably. Defaulted so ``dataclasses.asdict`` and every
+    existing positional construction keep working.
+    """
 
     speaker: str  # exactly "You" or "Them"
     text: str
     start: float
     end: float
     words: tuple[Word, ...] = ()
+    echo_suspected: bool = False
 
 
 @dataclass(frozen=True)

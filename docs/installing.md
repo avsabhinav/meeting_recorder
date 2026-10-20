@@ -225,7 +225,7 @@ mr process --mic <wav> --system <wav>
 - `--system` — them-side 16 kHz mono WAV (required)
 - `--model` — Hugging Face repo id (default: `mlx-community/whisper-large-v3-turbo`)
 - `--language` — forced language code (default: `en`)
-- `--dedup-threshold` — echo-dedup similarity threshold, 0–1 (default: `0.6`)
+- `--dedup-threshold` — echo-dedup similarity threshold, 0–1 (default: `0.6`). Echo is removed word by word, so a line that mixes the other speaker's audio with your own keeps your words and loses theirs; a line that was entirely echo disappears. Nothing is ever hidden: a segment that has no word timings to trim is printed with a trailing `*(possible echo)*` marker instead, and the JSON sidecar (`--json`) carries `"echo_suspected": true` on it
 - `--json` — also write `<stamp>.json`
 - `--stamp` — label for the transcript file (default: the system WAV's stem)
 - `--out-dir` — output directory (default: the system WAV's directory)

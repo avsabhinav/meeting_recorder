@@ -16,6 +16,14 @@ from mr.core.schema import Segment, format_ts
 SCHEMA_VERSION = 1
 PARTICIPANTS_LINE = "You (mic), Them (system)"
 
+#: Suffix appended to a segment the merge step suspects is echo of the other
+#: side's audio. Reaching the Markdown at all is now the exception: the merge
+#: removes echo word by word, so a flagged segment is one that had no word
+#: timings to trim (``Segment.words`` empty) and could only be judged whole.
+#: Marked rather than hidden, because hiding it would delete whatever genuine
+#: speech shares the segment.
+ECHO_MARKER = "*(possible echo)*"
+
 # First characters that give a bare YAML scalar special meaning.
 _YAML_SPECIAL_FIRST = set("-?:[]{}#&*!|>'\"%@\u0060")
 
@@ -86,6 +94,13 @@ def render_transcript_md(
 ) -> str:
     """Render the transcript Markdown as a pure string (no file I/O).
 
+    Segments marked ``echo_suspected`` are printed with a
+    :data:`ECHO_MARKER` suffix rather than omitted. The merge now strips
+    echo word by word, so a segment arrives here flagged only when it had no
+    word timings to trim and had to be judged whole. Hiding such a segment
+    would delete whatever genuine speech shares it; marking it cannot, and
+    the reader can judge the duplicate for themselves.
+
     When ``context`` is a non-empty dict, an Obsidian YAML frontmatter
     block is prepended; otherwise the output is unchanged.
     """
@@ -100,7 +115,8 @@ def render_transcript_md(
         "",
     ]
     for seg in segments:
-        lines.append(f"**{seg.speaker} ({format_ts(seg.start)}):** {seg.text}")
+        suffix = f" {ECHO_MARKER}" if seg.echo_suspected else ""
+        lines.append(f"**{seg.speaker} ({format_ts(seg.start)}):** {seg.text}{suffix}")
         lines.append("")
     # Join and drop the trailing blank line added after the last segment.
     body = "\n".join(lines).rstrip("\n")
@@ -128,16 +144,31 @@ def render_transcript_json(
 ) -> dict:
     """Build the JSON sidecar payload as plain dict/list (no file I/O).
 
+    Every segment is included, echo-suspected ones carrying
+    ``"echo_suspected": true``. The Markdown now marks those segments rather
+    than hiding them, so the sidecar is no longer the only place they
+    survive; it remains the machine-readable record, and the only one
+    carrying word-level timings. The key is emitted only when true, keeping
+    the payload unchanged for recordings with no suspected echo.
+
     When ``context`` is a non-empty dict, it is included as a ``"context"``
     key (the raw passed-in dict); otherwise the output is unchanged.
     """
+    segment_payloads: list[dict] = []
+    for seg in segments:
+        entry: dict = {
+            "speaker": seg.speaker,
+            "start": seg.start,
+            "end": seg.end,
+            "text": seg.text,
+        }
+        if seg.echo_suspected:
+            entry["echo_suspected"] = True
+        segment_payloads.append(entry)
     payload: dict = {
         "schema_version": SCHEMA_VERSION,
         "stamp": stamp,
-        "segments": [
-            {"speaker": seg.speaker, "start": seg.start, "end": seg.end, "text": seg.text}
-            for seg in segments
-        ],
+        "segments": segment_payloads,
     }
     if context:
         payload["context"] = context

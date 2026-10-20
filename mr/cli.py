@@ -22,12 +22,14 @@ binary is spawned via ``subprocess.Popen`` and only the PID is persisted.
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 import platform
 import signal
 import subprocess
 import sys
 import time
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -36,18 +38,24 @@ import typer
 
 from mr.config import Config, load_config, set_out_root
 from mr.core.capture import assert_capture_bin
-from mr.core.merge import merge_transcripts
+from mr.core.merge import merge_transcripts, shift_segments
 from mr.core.output import (
     render_transcript_json,
     render_transcript_md,
     write_json,
     write_transcript,
 )
+from mr.core.schema import from_capture_dict
 from mr.core.transcribe import DEFAULT_MODEL, ModelNotCachedError, transcribe_audio
 from mr.heartbeat import clear_transcribing_heartbeat, write_transcribing_heartbeat
 from mr.state import clear_state, is_clear, is_stale, new_stamp, read_state, write_state
 
 app = typer.Typer(help="Local-first meeting recorder: capture and transcribe 1:1 calls.")
+
+#: Per-recording log file holding the detached ``mr _transcribe`` worker's
+#: stdout/stderr. Lives next to the WAVs so a failure is diagnosable from the
+#: recording dir alone.
+TRANSCRIBE_LOG_NAME = ".transcribe.log"
 
 
 @app.callback()
@@ -89,10 +97,15 @@ def _spawn_capture(out_dir: str, binary: str, log_path: Path | None = None) -> i
 def _spawn_transcription(stamp: str, out_dir: str, *, json_sidecar: bool = False) -> bool:
     """Spawn ``mr _transcribe`` as a detached background process (MB-BG/B2).
 
-    The child runs in its own session (``start_new_session=True``) with all
-    stdio discarded, so it outlives this short-lived CLI and ``mr stop``
-    returns immediately. The worker owns the transcription heartbeat and the
-    completion notification. Returns ``True`` if the process was spawned.
+    The child runs in its own session (``start_new_session=True``) so it
+    outlives this short-lived CLI and ``mr stop`` returns immediately. The
+    worker owns the transcription heartbeat and the completion notification.
+    Returns ``True`` if the process was spawned.
+
+    The child's stdout/stderr go to ``<out_dir>/.transcribe.log`` (same
+    pattern as :func:`_spawn_capture`): a worker that dies — OOM, corrupt
+    WAV, mlx crash — must leave a trace, otherwise a silent failure and a
+    slow success are indistinguishable. ``stdin`` stays ``DEVNULL``.
 
     When frozen (PyInstaller), ``sys.executable`` IS the ``mr-cli`` binary, so
     the ``-m mr.cli`` prefix is dropped (it would be parsed as an unknown
@@ -108,15 +121,24 @@ def _spawn_transcription(stamp: str, out_dir: str, *, json_sidecar: bool = False
     if json_sidecar:
         args.append("--json")
     try:
+        log_fh = open(Path(out_dir) / TRANSCRIBE_LOG_NAME, "a", encoding="utf-8")
+    except OSError:
+        # A missing/unwritable out_dir must not stop transcription; fall back
+        # to discarding the child's output rather than not spawning it.
+        log_fh = None
+    try:
         subprocess.Popen(
             args,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fh or subprocess.DEVNULL,
+            stderr=subprocess.STDOUT if log_fh else subprocess.DEVNULL,
             start_new_session=True,
         )
     except OSError:
         return False
+    finally:
+        if log_fh is not None:
+            log_fh.close()  # Popen dup'd the fd into the child
     return True
 
 
@@ -128,18 +150,6 @@ def _recordings_dir(cfg: Config) -> Path:
 def _transcripts_dir(cfg: Config) -> Path:
     """Directory holding the final ``<stamp>.md`` transcripts."""
     return Path(cfg.out_root) / "transcripts"
-
-
-def _system_vs_mic_offset(out_dir: str) -> float | None:
-    """Seconds by which the system (speaker) stream lags the mic stream's start,
-    from meta.json (mic.first_sample_seconds vs system.first_sample_seconds).
-    None when meta.json is missing/unparseable or lacks the fields."""
-    try:
-        meta = json.loads((Path(out_dir) / "meta.json").read_text(encoding="utf-8"))
-        m, s = meta["mic"], meta["system"]
-        return float(s["first_sample_seconds"]) - float(m["first_sample_seconds"])
-    except (OSError, KeyError, ValueError, TypeError):
-        return None
 
 
 def _transcribe_and_write(
@@ -158,14 +168,18 @@ def _transcribe_and_write(
     them = transcribe_audio(
         str(o / "system.wav"), speaker="Them", model=cfg.model, language=cfg.language
     )
-    echo_lag = _system_vs_mic_offset(out_dir)
+    # The two WAVs each start at their own first sample, so they must be put
+    # on one timeline before the overlap-based echo rule can see an echo and
+    # its original as concurrent. See _stream_start_offsets.
+    mic_offset, system_offset = _stream_start_offsets(o)
+    you_segments = shift_segments(list(you.segments), mic_offset)
+    them_segments = shift_segments(list(them.segments), system_offset)
     merged = merge_transcripts(
-        list(you.segments),
-        list(them.segments),
+        you_segments,
+        them_segments,
         dedup_threshold=cfg.dedup_threshold,
-        echo_lag_s=echo_lag,
     )
-    duration = max((s.end for s in list(you.segments) + list(them.segments)), default=0.0)
+    duration = max((s.end for s in you_segments + them_segments), default=0.0)
     context = _read_meeting_context(o)
     md_path = _transcripts_dir(cfg) / f"{stamp}.md"
     write_transcript(
@@ -199,6 +213,69 @@ def _read_meeting_context(out_dir: Path) -> dict[str, object] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _stream_start_offsets(out_dir: Path) -> tuple[float, float]:
+    """Return ``(mic_offset, system_offset)`` seconds aligning the two tracks.
+
+    ``mr-capture`` starts the mic and the system tap independently and each
+    WAV begins at its own first sample, so the two files share no timeline:
+    on ``2026-10-20_1553`` the system tap started 10.49 s after the mic, which
+    shifted every ``Them`` timestamp that much earlier than reality. The
+    stream that started *later* is the one missing time at its head, so it
+    gets the positive delta and the earlier stream gets ``0.0``.
+
+    Fail-soft: a missing, malformed, or incomplete ``meta.json`` yields
+    ``(0.0, 0.0)``. An unknown offset must shift nothing rather than guess —
+    a wrong shift is worse than the misalignment it tries to correct.
+    """
+    try:
+        parsed = json.loads((out_dir / "meta.json").read_text(encoding="utf-8"))
+        meta = from_capture_dict(parsed)
+    except (OSError, ValueError, TypeError, KeyError):
+        return (0.0, 0.0)
+    delta = meta.system.first_sample_seconds - meta.mic.first_sample_seconds
+    if delta > 0:
+        return (0.0, delta)  # system tap started late; push Them forward
+    return (-delta, 0.0)  # mic started late (or dead even); push You forward
+
+
+def _write_failed_stub(cfg: Config, stamp: str, out_dir: str, error: BaseException) -> Path | None:
+    """Write ``transcripts/<stamp>.FAILED.md`` describing a failed transcription.
+
+    The background worker is detached, so a crash is otherwise invisible: the
+    heartbeat just ages out and no transcript ever appears. This drops a
+    marker in the directory the user actually watches, pointing at the
+    worker log for the traceback. Fail-soft — returns ``None`` if the stub
+    itself cannot be written (never masks the original error).
+    """
+    path = _transcripts_dir(cfg) / f"{stamp}.FAILED.md"
+    log_path = Path(out_dir) / TRANSCRIBE_LOG_NAME
+    lines = [
+        f"# Transcription FAILED — {stamp}",
+        "",
+        f"- **Recording:** {out_dir}",
+        f"- **Error:** {type(error).__name__}: {error}",
+    ]
+    # The log only exists when the worker was spawned by `_spawn_transcription`
+    # (which creates it); running `mr _transcribe` by hand writes to the
+    # terminal instead. Don't point the user at a file that isn't there.
+    if log_path.is_file():
+        lines.append(f"- **Log:** {log_path}")
+    lines += [
+        "",
+        "The audio is intact. Re-run the transcription with:",
+        "",
+        "```sh",
+        f"mr _transcribe {stamp} {out_dir}",
+        "```",
+    ]
+    text = "\n".join(lines)
+    try:
+        write_transcript(path, text)
+    except OSError:
+        return None
+    return path
+
+
 def _transcribe_worker(
     cfg: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False
 ) -> Path:
@@ -206,9 +283,14 @@ def _transcribe_worker(
 
     Writes the transcription heartbeat, transcribes + writes
     ``transcripts/<stamp>.md`` (plus optional JSON sidecar), and clears the
-    heartbeat in ``finally`` — so the success path AND the
-    :class:`~mr.core.transcribe.ModelNotCachedError` path (exit 3) remove it.
-    When ``cfg.keep_audio`` is false the WAVs are deleted afterwards.
+    heartbeat in ``finally`` — so the success path AND every failure path
+    remove it.
+
+    Any failure also writes ``transcripts/<stamp>.FAILED.md`` and exits
+    non-zero (3 for :class:`~mr.core.transcribe.ModelNotCachedError`, 1
+    otherwise): a detached worker that dies silently is indistinguishable
+    from one still running. When ``cfg.keep_audio`` is false the WAVs are
+    deleted afterwards — only on success, so a retry still has its audio.
     """
     utc_now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     write_transcribing_heartbeat(cfg.out_root, stamp, utc_now)
@@ -216,9 +298,23 @@ def _transcribe_worker(
         md = _transcribe_and_write(cfg, stamp, out_dir, json_sidecar=json_sidecar)
     except ModelNotCachedError as e:
         typer.echo(f"error: {e}", err=True)
+        _write_failed_stub(cfg, stamp, out_dir, e)
         raise typer.Exit(code=3) from e
+    except Exception as e:
+        # Anything else (corrupt WAV, mlx crash, OOM-adjacent errors): the
+        # traceback goes to the worker log via stderr, the stub goes where
+        # the user will see it.
+        typer.echo(f"error: transcription failed for {stamp}: {e}", err=True)
+        traceback.print_exc()
+        _write_failed_stub(cfg, stamp, out_dir, e)
+        raise typer.Exit(code=1) from e
     finally:
         clear_transcribing_heartbeat(cfg.out_root, stamp)
+
+    # A successful (re-)run clears any marker left by an earlier failure, so
+    # the transcripts dir never shows a transcript and a FAILED stub for the
+    # same stamp.
+    (_transcripts_dir(cfg) / f"{stamp}.FAILED.md").unlink(missing_ok=True)
 
     if not cfg.keep_audio:
         for name in ("mic.wav", "system.wav"):
@@ -285,25 +381,6 @@ def _do_start(cfg: Config, context_json: Path | None = None) -> None:
     pid = _spawn_capture(str(out_dir), binary)
     write_state(cfg.out_root, pid, str(out_dir), stamp, datetime.now().isoformat())
     typer.echo(f"recording started (stamp {stamp})\nout_dir: {out_dir}")
-
-
-def notify_complete(stamp: str, md_path: Path) -> bool:
-    """Post a macOS completion notification via ``osascript`` (fail-soft).
-
-    Returns ``True`` when the notification was posted (``osascript`` exited
-    0), ``False`` otherwise (binary missing, timeout, OS error). Never
-    raises — a notification is never blocking or required.
-    """
-    msg = f'Recording "{stamp}" transcribed -> {md_path.name}'.replace('"', '\\"')
-    try:
-        proc = subprocess.run(
-            ["osascript", "-e", f'display notification "{msg}" with title "mr"'],
-            capture_output=True,
-            timeout=10,
-        )
-        return proc.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
 
 
 def _do_stop(cfg: Config, json_sidecar: bool) -> None:
@@ -441,7 +518,13 @@ def process(
         json_path = out / f"{stamp}.json"
         write_json(json_path, render_transcript_json(merged, stamp=stamp))
         typer.echo(f"wrote {json_path}")
-    typer.echo(f"kept {len(merged)} segments")
+    kept = sum(1 for s in merged if not s.echo_suspected)
+    echoed = len(merged) - kept
+    msg = f"kept {kept} segments"
+    if echoed:
+        # Flagged, not deleted: they are in the JSON sidecar when one was asked for.
+        msg += f" ({echoed} echo-suspected, omitted from the transcript)"
+    typer.echo(msg)
 
 
 @app.command(hidden=True, name="_transcribe")
@@ -454,7 +537,11 @@ def transcribe_worker(
     cfg = load_config()
     md = _transcribe_worker(cfg, stamp, out_dir, json_sidecar=json)
     typer.echo(f"wrote {md}")
-    notify_complete(stamp, md)  # fail-soft; never blocks or raises
+    # No notification here: this worker is a detached process with no bundle
+    # identity, so an `osascript` notification was owned by Script Editor (no
+    # Oatmeal branding, and clicking it opened that app). The menu-bar app
+    # watches the transcripts dir and posts the notification itself — see
+    # menu-bar/Sources/Oatmeal/TranscriptNotifier.swift.
 
 
 @app.command()
@@ -578,6 +665,15 @@ def config_get(
 
 
 def main() -> None:
+    # MUST come before `app()`: multiprocessing re-spawns `sys.executable` with
+    # interpreter flags (`-B`, `-c ...`), and in a FROZEN build sys.executable
+    # IS the mr-cli binary — so typer parsed `-B` as an unknown option and the
+    # pool worker died ("No such option: -B" in .transcribe.log, followed by a
+    # resource_tracker leak warning). freeze_support() intercepts those
+    # re-spawns before any argument parsing. Same frozen/venv spawn hazard as
+    # `_spawn_transcription`; see docs/architecture.md "Pipeline step 2".
+    # It is a no-op in a normal venv run and when not a re-spawned child.
+    multiprocessing.freeze_support()
     app()
 
 

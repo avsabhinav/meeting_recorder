@@ -34,12 +34,36 @@ examples/demo/    # sample aligned WAVs + generated .md
    device + IOProc** (not AudioQueue). Voice processing (VPIO) was **removed** — a
    real call showed it degraded audio (the spike originally noted VPIO input, AEC on,
    reports **9 channels** with user voice on **channel 0**); the mic is now a
-   **raw 1-channel tap**. Keep the spike gotchas (INVESTIGATION.md) as
+   **raw tap, downmixed across all channels** to mono — the channel-0 pick was
+   only valid for that VPIO layout, and on a stereo interface or aggregate
+   device it yields silence or a half-signal. `MicCapture` and `SystemTap`
+   downmix identically. Keep the spike gotchas (INVESTIGATION.md) as
    comments/README.
 2. **Echo philosophy:** capture is **RAW** (no voice processing by design, so
    recording never degrades an active call); the merge-time **text-overlap dedup**
    (rapidfuzz token_ratio ≥ `dedup_threshold`, default 0.6, over time-overlap) is
-   the **sole** echo handling.
+   the **sole** echo handling. Echo is removed at **word** level, not segment
+   level: `merge_transcripts` drops only the `You` words the speaker was saying
+   concurrently (`Segment.words` timings vs the matching `Them` interval,
+   widened by `_WORD_EDGE_TOLERANCE_S = 0.3` s). Whisper segments the two tracks
+   on different boundaries, so one mic segment routinely straddles echoed
+   speaker audio *and* the user's own words — segment-level handling therefore
+   either deletes real speech (hiding the segment: on `2026-10-20_1553` every
+   `You` segment was flagged and the transcript read as if the user never spoke)
+   or duplicates the speaker's line (printing it: unreadable on a long meeting).
+   A trimmed segment comes back with `echo_suspected=False` — what survives is
+   genuine speech and needs no marker. A segment every word of which was echoed
+   is dropped. Only a segment with **no word timings** cannot be trimmed; it is
+   flagged and printed with a `*(possible echo)*` marker, never hidden. The edge
+   tolerance exists because Whisper's word boundaries are approximate: a strict
+   test left crumbs of the speaker's audio glued to genuine speech ("...let's
+   see **and**", "**basis** okay that will end the recording"), all within 0.3 s
+   of a boundary. Utterances under 4 words need near-exact similarity (95%)
+   before they can match at all — two people saying "yeah" is conversation, not
+   echo, and that guard keeps a lone short utterance out of trimming entirely. A
+   delay-aware rule once widened matching to a ~10 s window using the mic/system
+   `first_sample_seconds` difference; it was **removed**, because that difference
+   measures tap-callback scheduling, not speaker→air→mic acoustic delay.
 3. **Model handling:** load by HF repo id only so `mlx-whisper`/`huggingface_hub`
    use the **standard HF hub cache**; never a custom cache_dir. At call time run
    **cache-only** (`HF_HUB_OFFLINE=1`, `local_files_only`). Pre-fetch + report via
@@ -77,12 +101,30 @@ examples/demo/    # sample aligned WAVs + generated .md
    and in the **frozen** (PyInstaller) build — where `sys.executable` IS the
    `mr-cli` binary — it runs `[sys.executable, "_transcribe", …]` and must NOT
    prepend `-m mr.cli` (the frozen CLI treats `-m` as an unknown argument). Both
-   spawn with stdio to `/dev/null` and `start_new_session=True`, so the worker
-   outlives `mr stop`. A spawn/crash failure is silent (the worker owns any
-   error reporting).
+   spawn with `stdin=/dev/null`, **stdout+stderr appended to
+   `recordings/<stamp>/.transcribe.log`**, and `start_new_session=True`, so the
+   worker outlives `mr stop` and a worker that dies still leaves a traceback
+   on disk. (An unwritable `out_dir` falls back to `/dev/null` rather than
+   refusing to spawn — the log is a diagnostic, not a precondition.) The worker
+   owns its own error reporting; see step 6.
 3. Background `mr _transcribe` writes the `transcribing.json` heartbeat, then
    `transcribe` both tracks (sequential) → `TranscriptionResult`s.
-4. `merge_transcripts(you, them, dedup_threshold=0.6)` → sorted, deduped segments.
+3a. **Track alignment.** The mic and the system tap do not start together, and
+   each WAV begins at its own first sample as if that sample were t=0 — so the
+   two tracks share no timeline. `_stream_start_offsets(out_dir)` reads the two
+   `first_sample_seconds` from `meta.json` and `shift_segments` pushes whichever
+   stream started later forward by the delta (word timestamps move with their
+   segment). Measured deltas: 0.98 s, 7.0 s, 10.5 s with the system tap late,
+   0.09 s with the mic late. Without this the overlap-based echo rule never sees
+   an echo and its original as concurrent, and speaker bleed lands under `You`.
+   Missing or unparseable `meta.json` → `(0.0, 0.0)`: an unknown offset shifts
+   nothing, because a wrong shift is worse than the misalignment.
+4. `merge_transcripts(you, them, dedup_threshold=0.6)` → segments sorted
+   chronologically, with echoed `You` **words** trimmed out (decision #2). A
+   trimmed segment carries `echo_suspected=False` and tightened `start`/`end`;
+   a wholly-echoed one is dropped; one with no word timings is returned
+   `echo_suspected=True` for the writers in step 5 to mark. `Them` segments are
+   never touched.
 5. `output` → `~/Meetings/transcripts/<stamp>.md` (+ optional JSON sidecar).
    If `recordings/<stamp>/meeting_context.json` exists (loaded by
    `_transcribe_and_write`), the `.md` gets an **Obsidian YAML frontmatter**
@@ -90,10 +132,27 @@ examples/demo/    # sample aligned WAVs + generated .md
    start, fallback today), `attendees` (flow list, omitted if empty), `notes`
    (omitted if empty), `duration` (`<m>m <s>s`), `source` (`recordings/<stamp>/`)
    — and the JSON sidecar gains a `"context"` key with the raw dict. No context
-   → output is identical to the plain path.
+   → output is identical to the plain path. Trimmed segments reach the `.md` as
+   ordinary lines (no marker — what survived trimming is genuine speech); the
+   only lines carrying `*(possible echo)*` (`ECHO_MARKER` in
+   `mr/core/output.py`) are segments that had no word timings to trim. The
+   sidecar keeps whatever the merge returned, with `"echo_suspected": true` on
+   those same untrimmable segments (the key is written only when true, so a
+   recording with no suspected echo produces the same payload as before), and
+   is the only artifact carrying word-level timings.
 6. The worker clears the `transcribing.json` heartbeat in a `finally` (so it
-   happens on both the success and the model-not-cached paths), then raises the
+   happens on the success path AND every failure path), then raises the
    `osascript` completion notification (fail-soft; never blocks or raises).
+   **On failure** it writes `transcripts/<stamp>.FAILED.md` — naming the
+   recording dir, the exception, the `.transcribe.log` path (only when that
+   file exists: a hand-run `mr _transcribe` prints to the terminal instead and
+   the stub must not point at a missing file), and the
+   `mr _transcribe <stamp> <out_dir>` retry command — and exits non-zero (3 for
+   `ModelNotCachedError`, 1 for anything else). The WAVs are **not** deleted on
+   a failed run even when `keep_audio` is false, so a retry still has its audio;
+   a later successful run removes the stale `.FAILED.md`. Before this, a crashed
+   transcription was indistinguishable from a slow one: no transcript, no error,
+   and a heartbeat that silently aged out.
 
 ## Production packaging (menu-bar + DMG)
 
@@ -102,8 +161,15 @@ The distributable is a self-contained `.app` inside a DMG, built by
 
 - **Frozen CLI (PyInstaller):** `packaging/freeze_cli.sh` produces a onedir
   frozen `mr-cli` in `dist-freeze/mr-cli` (PyInstaller 6; collects `mlx`/
-  `mlx_whisper`). `make_dmg.sh` **re-freezes from source first**, so a DMG can
-  never embed a stale binary.
+  `mlx_whisper`, and **excludes** `torch` and `torchgen`, which
+  `--collect-all mlx` drags in transitively but this pipeline never imports —
+  the only torch reference is `mlx_whisper/torch_whisper.py`, a
+  weight-conversion helper nothing imports). Do **not** also exclude `numba` or
+  `scipy`: `mlx_whisper/timing.py` imports both at module scope and
+  `__init__.py -> transcribe.py -> timing.py` makes that unconditional, so
+  excluding them freezes cleanly and then fails at transcription time with
+  `ModuleNotFoundError`. `make_dmg.sh` **re-freezes from source first**, so a
+  DMG can never embed a stale binary.
 - **Self-contained app:** `menu-bar/install.sh` copies the frozen CLI tree into
   `Oatmeal.app/Contents/Resources/mr-cli/` and the `mr-capture` helper into
   `Oatmeal.app/Contents/Resources/mr-capture`, then adhoc-signs. The app resolves

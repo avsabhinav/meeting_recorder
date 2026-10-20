@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date
 
 from mr.core.output import (
+    ECHO_MARKER,
     render_transcript_json,
     render_transcript_md,
     write_json,
@@ -181,6 +183,96 @@ def test_render_transcript_json() -> None:
             {"speaker": "You", "start": 6.0, "end": 8.4, "text": "great, thanks!"},
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# echo_suspected: MARKED in the Markdown, preserved in the JSON sidecar.
+# Hiding a flagged segment deletes any genuine speech that shares it, because
+# Whisper's two tracks segment on different boundaries (2026-10-20_1553: every
+# You segment flagged, transcript read as if the user never spoke).
+# ---------------------------------------------------------------------------
+
+
+ECHO_SEGMENTS: list[Segment] = [
+    _seg("Them", 2.3, 5.8, "yeah, I hear you just fine."),
+    Segment(
+        speaker="You",
+        text="yeah, I hear you just fine.",
+        start=2.5,
+        end=5.9,
+        echo_suspected=True,
+    ),
+    _seg("You", 6.0, 8.4, "great, thanks!"),
+]
+
+
+def test_render_transcript_md_marks_echo_suspected() -> None:
+    md = render_transcript_md(
+        stamp="s",
+        source_dir="d",
+        segments=ECHO_SEGMENTS,
+        duration_seconds=60,
+    )
+    body = md.split("## Transcript\n\n", 1)[1]
+    assert body == (
+        "**Them (00:02):** yeah, I hear you just fine.\n"
+        "\n"
+        "**You (00:02):** yeah, I hear you just fine. *(possible echo)*\n"
+        "\n"
+        "**You (00:06):** great, thanks!"
+    )
+    # Only the flagged line carries the marker.
+    assert body.count(ECHO_MARKER) == 1
+
+
+def test_render_transcript_md_all_echo_keeps_every_line() -> None:
+    """Every segment flagged: nothing is hidden — speech loss is impossible.
+
+    This is the guarantee the marker buys. Under the previous omit-on-flag
+    behaviour this document rendered with an empty transcript body.
+    """
+    only_echo = [replace(s, echo_suspected=True) for s in SEGMENTS]
+    md = render_transcript_md(
+        stamp="s", source_dir="d", segments=only_echo, duration_seconds=60
+    )
+    body = md.split("## Transcript\n\n", 1)[1]
+    assert "great, thanks!" in md
+    assert len([ln for ln in body.splitlines() if ln.strip()]) == len(SEGMENTS)
+    assert body.count(ECHO_MARKER) == len(SEGMENTS)
+
+
+def test_render_transcript_md_unflagged_output_unchanged() -> None:
+    """No flags: the Markdown is byte-identical to the pre-marker rendering."""
+    md = render_transcript_md(
+        stamp="s", source_dir="d", segments=SEGMENTS, duration_seconds=60
+    )
+    assert ECHO_MARKER not in md
+
+
+def test_render_transcript_json_keeps_echo_suspected() -> None:
+    data = render_transcript_json(ECHO_SEGMENTS, stamp="s")
+    assert data["segments"] == [
+        {
+            "speaker": "Them",
+            "start": 2.3,
+            "end": 5.8,
+            "text": "yeah, I hear you just fine.",
+        },
+        {
+            "speaker": "You",
+            "start": 2.5,
+            "end": 5.9,
+            "text": "yeah, I hear you just fine.",
+            "echo_suspected": True,
+        },
+        {"speaker": "You", "start": 6.0, "end": 8.4, "text": "great, thanks!"},
+    ]
+
+
+def test_render_transcript_json_omits_key_when_not_suspected() -> None:
+    """Unflagged recordings keep the pre-existing payload byte-for-byte."""
+    data = render_transcript_json(SEGMENTS, stamp="s")
+    assert all("echo_suspected" not in entry for entry in data["segments"])
 
 
 def test_write_transcript_creates_parent_dirs(tmp_path) -> None:
