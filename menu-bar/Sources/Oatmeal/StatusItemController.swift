@@ -113,9 +113,15 @@ final class StatusItemController: NSObject {
     @objc func togglePressed(_ sender: Any?) {
         refresh()
         guard let button = statusItem.button else { return }
+        // Anchor at the button's bottom edge with NO manual offset. The old
+        // `maxY + 4` was tuned when an inert "(idle)" label was row 1 and a
+        // few points of slop went unnoticed; now that row 1 is a real,
+        // highlightable item, AppKit re-positions the menu as soon as the
+        // cursor enters it — which is the "jump" (first item clipped, then the
+        // menu shifting down and sitting off the menu bar).
         menuBuilder.menu.popUp(
             positioning: nil,
-            at: NSPoint(x: 0, y: button.bounds.maxY + 4),
+            at: NSPoint(x: 0, y: button.bounds.maxY),
             in: button
         )
     }
@@ -219,12 +225,17 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// "Check Active Transcriptions…" → on-demand, OFF the main thread. Flips the
-    /// item label to "Searching…", queries `mr status` + the heartbeat, then
-    /// updates the row to the active stamp (or "None") and syncs live state.
+    /// "Check Active Transcriptions…" → on-demand, OFF the main thread. Queries
+    /// `mr status` + the heartbeat, syncs live state, and reports the result in
+    /// an alert.
+    ///
+    /// The result MUST go somewhere that outlives the menu: clicking a menu
+    /// item dismisses the dropdown, and the next open calls
+    /// `MenuBuilder.rebuild`, which removes and recreates every row. An
+    /// in-place retitle of the clicked row (what this used to do) was therefore
+    /// written to an item nobody could see and discarded on the next open —
+    /// the item looked like it did nothing at all.
     @objc func checkActiveTranscriptions(_ sender: Any?) {
-        let tag = MenuBuilder.checkTranscriptionsTag
-        menuBuilder.menu.item(withTag: tag)?.title = "Searching…"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             var recording = false
@@ -234,13 +245,31 @@ final class StatusItemController: NSObject {
             }
             // Report the in-flight transcription (fresh heartbeat) if any; else "None".
             let base = self.transcriptionBase
-            let stamp = TranscriptionState(baseURL: base).activeHeartbeat()?.stamp
+            let heartbeat = TranscriptionState(baseURL: base).activeHeartbeat()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.isLiveRecording = recording
                 self.setLive(recording)
-                let final = MenuBuilder.transcriptionResultText(stamp: stamp)
-                self.menuBuilder.menu.item(withTag: tag)?.title = final
+
+                let alert = NSAlert()
+                alert.alertStyle = .informational
+                if let heartbeat {
+                    alert.messageText = "Transcription in progress"
+                    var detail = MenuBuilder.transcriptionResultText(stamp: heartbeat.stamp)
+                    if let startedAt = heartbeat.startedAt {
+                        let elapsed = Int(Date().timeIntervalSince(startedAt))
+                        detail += "\nRunning for \(elapsed / 60)m \(elapsed % 60)s."
+                    }
+                    detail += "\n\nThe transcript appears in the transcripts folder when it finishes."
+                    alert.informativeText = detail
+                } else {
+                    alert.messageText = "No active transcription"
+                    alert.informativeText =
+                        MenuBuilder.transcriptionResultText(stamp: nil) +
+                        "\n\nIf a recording finished without producing a transcript, check " +
+                        "the transcripts folder for a `.FAILED.md` file."
+                }
+                alert.runModal()
                 self.statusItem.button?.needsDisplay = true
             }
         }
@@ -439,6 +468,15 @@ final class StatusItemController: NSObject {
 
         let alert = NSAlert()
         if result.exit == 0 {
+            // Let the transcript watcher follow the move (it would otherwise
+            // keep watching the old transcripts dir and stop notifying).
+            let newRoot = result.out.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !newRoot.isEmpty {
+                NotificationCenter.default.post(
+                    name: .oatmealStorageRootChanged,
+                    object: newRoot
+                )
+            }
             alert.alertStyle = .informational
             alert.messageText = "Storage location updated."
             alert.informativeText =

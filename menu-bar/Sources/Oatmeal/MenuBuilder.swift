@@ -113,9 +113,6 @@ final class MenuBuilder {
     func rebuild(status: MRStatus, isCLIAvailable: Bool, calendarEvents: [MeetingEvent] = []) {
         menu.removeAllItems()
 
-        // Row 1: inert status label (no action, disabled).
-        menu.addItem(disabledItem(statusHeader(status)))
-
         let start = NSMenuItem(
             title: "Start Recording",
             action: #selector(StatusItemController.startRecording(_:)),
@@ -124,6 +121,36 @@ final class MenuBuilder {
         start.target = target
         start.isEnabled = isCLIAvailable && !status.recording
         menu.addItem(start)
+
+        // Calendar quick-start (CAL-L2/L3) sits directly below "Start Recording":
+        // the two are alternatives for the same intent, so burying it further
+        // down made it easy to miss and default to the plain start. A CLICK
+        // action on the top-level item fetches events off-main and pops a
+        // dynamic submenu (`startRecordingFromCalendar`); a static submenu is
+        // attached only when the caller pre-supplies `calendarEvents` (still
+        // clickable either way). Tag lets the controller find/retitle it.
+        let calendarItem = NSMenuItem(
+            title: "Start Recording from Calendar…",
+            action: #selector(StatusItemController.startRecordingFromCalendar(_:)),
+            keyEquivalent: ""
+        )
+        calendarItem.tag = Self.calendarMenuTag
+        calendarItem.target = target
+        // Same condition as "Start Recording": both are ways to START, so a
+        // live recording must disable BOTH. Checking only `isCLIAvailable`
+        // left whichever row the user did not use still clickable mid-
+        // recording. While recording, "Stop Recording & Transcribe" is the
+        // only enabled row in this section.
+        calendarItem.isEnabled = isCLIAvailable && !status.recording
+        if !calendarEvents.isEmpty {
+            calendarItem.submenu = Self.buildCalendarSubmenu(
+                calendarEvents,
+                isEnabled: isCLIAvailable && !status.recording,
+                target: target,
+                action: #selector(StatusItemController.startRecordingWithCalendarEvent(_:))
+            )
+        }
+        menu.addItem(calendarItem)
 
         let stop = NSMenuItem(
             title: "Stop Recording & Transcribe",
@@ -142,7 +169,8 @@ final class MenuBuilder {
 
         // On-demand transcription status (MB-DISPLAY/D2): the user explicitly
         // asks for it; the controller does the CLI/heartbeat work off the main
-        // thread.
+        // thread and reports in an alert (clicking dismisses this menu, so an
+        // in-place retitle would never be seen).
         menu.addItem(.separator())
         let checkTranscriptions = NSMenuItem(
             title: "Check Active Transcriptions…",
@@ -153,29 +181,6 @@ final class MenuBuilder {
         checkTranscriptions.target = target
         checkTranscriptions.isEnabled = isCLIAvailable
         menu.addItem(checkTranscriptions)
-
-        // Calendar quick-start (CAL-L2/L3): a CLICK action on the top-level item
-        // that fetches events off-main and pops a dynamic submenu
-        // (`startRecordingFromCalendar`). We keep the item attachable to a
-        // static submenu only when the caller pre-supplies `calendarEvents`
-        // (still clickable either way). Tag lets the controller find/retitle it.
-        let calendarItem = NSMenuItem(
-            title: "Start Recording from Calendar…",
-            action: #selector(StatusItemController.startRecordingFromCalendar(_:)),
-            keyEquivalent: ""
-        )
-        calendarItem.tag = Self.calendarMenuTag
-        calendarItem.target = target
-        calendarItem.isEnabled = isCLIAvailable
-        if !calendarEvents.isEmpty {
-            calendarItem.submenu = Self.buildCalendarSubmenu(
-                calendarEvents,
-                isEnabled: isCLIAvailable,
-                target: target,
-                action: #selector(StatusItemController.startRecordingWithCalendarEvent(_:))
-            )
-        }
-        menu.addItem(calendarItem)
 
         // Storage location + folder access (MB-SW4): real actions. Both need
         // the CLI (the app never reads/writes config itself), so they are
@@ -229,11 +234,6 @@ final class MenuBuilder {
         )
         quit.target = target
         menu.addItem(quit)
-    }
-
-    /// Plain-text status shown in the inert top row (MB-SW7).
-    private func statusHeader(_ status: MRStatus) -> String {
-        status.recording ? "(recording)" : "(idle)"
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {

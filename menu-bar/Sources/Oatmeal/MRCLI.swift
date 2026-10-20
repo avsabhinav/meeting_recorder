@@ -12,8 +12,11 @@ struct ProcessRunner {
     /// Real implementation via Foundation `Process`.
     static let `default` = ProcessRunner(run: ProcessRunner.realRun)
 
-    /// Hard timeout: `mr stop` transcribes (can take 1–3 min), so this is
-    /// generous. On timeout the child is killed and an error is thrown.
+    /// Hard timeout for any `mr` invocation. Every command returns quickly
+    /// now — `stop` spawns the transcription in a detached worker and returns
+    /// in ~1-2 s (MB-BG/B2), it no longer transcribes inline — so this is a
+    /// hung-child backstop, not a budget for real work.
+    /// On timeout the child is killed and an error is thrown.
     static let timeoutSeconds: TimeInterval = 120
 
     static func realRun(_ exe: URL, _ args: [String], _ env: [String: String]) throws -> (String, Int32) {

@@ -15,3 +15,13 @@ struct StorageLocation {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+
+extension Notification.Name {
+    /// Posted on the main thread after `mr config set out_root` succeeds, with
+    /// the new root as the notification `object` (a `String`).
+    ///
+    /// The transcript watcher listens so it can follow the move; otherwise it
+    /// keeps watching the previous directory and notifications quietly stop
+    /// for the rest of the session.
+    static let oatmealStorageRootChanged = Notification.Name("OatmealStorageRootChanged")
+}
