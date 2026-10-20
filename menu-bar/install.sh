@@ -67,6 +67,16 @@ if [[ -x "$FROZEN_CLI/mr-cli" && -x "$CAP_BIN" ]]; then
   cp -f "$CAP_BIN" "$RES_DIR/mr-capture"
   chmod +x "$RES_DIR/mr-capture"
   echo "embedded frozen mr-cli + mr-capture in $RES_DIR"
+  # This script COPIES mr-capture, it never builds it. A helper older than its
+  # own sources means someone edited capture/Sources and did not run
+  # capture/build.sh — the bundle would ship the old binary silently, which is
+  # exactly how an 11-day-old helper survived several reinstalls. Report it;
+  # packaging/make_dmg.sh builds the helper first so this stays quiet there.
+  NEWER_SRC="$(find ../capture/Sources -name '*.swift' -newer "$CAP_BIN" -print -quit 2>/dev/null || true)"
+  if [[ -n "$NEWER_SRC" ]]; then
+    echo "WARN: $CAP_BIN is OLDER than capture/Sources (e.g. $NEWER_SRC)."
+    echo "WARN: the bundled mr-capture is stale — run capture/build.sh, or use packaging/make_dmg.sh."
+  fi
 else
   echo "WARN: frozen CLI ($FROZEN_CLI) or mr-capture ($CAP_BIN) missing — skipping embed; app is NOT self-contained (dev build)."
 fi

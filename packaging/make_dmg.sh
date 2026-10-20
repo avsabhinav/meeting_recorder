@@ -4,8 +4,12 @@
 # Usage: ./packaging/make_dmg.sh   (from anywhere; idempotent, user-local only)
 #
 # What it does:
-#   1. Freezes the mr CLI from source (packaging/freeze_cli.sh) so the bundled
-#      binary is always current — a stale dist-freeze must never ship.
+#   1. Builds the mr-capture helper from source (capture/build.sh) and freezes
+#      the mr CLI (packaging/freeze_cli.sh), so both bundled binaries are
+#      always current — a stale artifact must never ship. menu-bar/install.sh
+#      only COPIES mr-capture from capture/.build/release, so without this
+#      step the DMG silently carries whatever helper was last built by hand
+#      (this shipped an 11-day-old mr-capture through several reinstalls).
 #   2. Builds Oatmeal.app (with the embedded frozen CLI + mr-capture inside)
 #      via menu-bar/install.sh
 #   3. Stages a DMG volume containing ONLY:
@@ -51,7 +55,14 @@ VOL="$STAGING/volume"
 mkdir -p "$VOL"
 
 # --- 1. Build all artifacts fresh from source. ------------------------------
-# Freeze the CLI from the current source FIRST. `install.sh` embeds whatever is
+# Build the Swift capture helper FIRST. menu-bar/install.sh only *copies*
+# capture/.build/release/mr-capture into the bundle — it never builds it — so
+# without this the DMG ships whatever helper happens to be lying in the build
+# dir. Same rule as the CLI freeze below: nothing stale leaves this script.
+echo "==> Building the mr-capture helper from source (capture/build.sh)"
+bash capture/build.sh
+
+# Freeze the CLI from the current source. `install.sh` embeds whatever is
 # in dist-freeze/mr-cli, so re-freezing here guarantees the DMG cannot carry a
 # stale binary (the working tree's cli.py is the source of truth).
 echo "==> Freezing the mr CLI from source (packaging/freeze_cli.sh)"
