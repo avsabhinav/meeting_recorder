@@ -32,8 +32,16 @@ do {
 
 // MARK: - Start capture
 
-// Mic first (TCC prompt, if any, happens here), then the system tap —
-// both start about the same time.
+// Mic first (TCC prompt, if any, happens here), then the system tap.
+//
+// These do NOT start at the same time: the mic begins writing as soon as
+// engine.start() returns, while the tap then runs five blocking Core Audio
+// calls before its first buffer arrives. Measured first-sample deltas run
+// from 0.09 s to 10.5 s. `captureStart` is the common t=0 the per-stream
+// timings below are reported against.
+let captureStart = CFAbsoluteTimeGetCurrent()
+func sinceStart() -> Double { (CFAbsoluteTimeGetCurrent() - captureStart) * 1000 }
+
 let mic: MicCapture
 do { mic = try MicCapture(outPath: outDir + "/mic.wav") } catch { die("\(error)") }
 do { try mic.start() } catch {
@@ -41,12 +49,19 @@ do { try mic.start() } catch {
     die("mic: \(error)")
 }
 log("mic: \(mic.deviceName) @ \(mic.nativeSampleRate) Hz x\(mic.nativeChannels)")
+log(String(format: "timing: mic.start() returned at +%.0f ms", sinceStart()))
 
 let systemWriter: WavWriter
 do { systemWriter = try WavWriter(path: outDir + "/system.wav") } catch { die("\(error)") }
 let system = SystemTapCapture(writer: systemWriter)
+let tapStartBegan = sinceStart()
 do { try system.start() } catch { die("system tap: \(error)") }
 log("system: \(system.deviceName) @ \(system.nativeSampleRate) Hz x\(system.nativeChannels)")
+log(String(format: "timing: system.start() began at +%.0f ms, returned at +%.0f ms",
+           tapStartBegan, sinceStart()))
+for (label, ms) in system.startStepMillis {
+    log(String(format: "timing:   %@ %.0f ms", label, ms))
+}
 log("recording to \(outDir) — Ctrl-C to stop")
 
 // MARK: - Stop on SIGINT / SIGTERM
@@ -96,7 +111,17 @@ func shutdown() -> Never {
     systemWriter.close()
     writeMeta(outDir)
     log(String(format: "mic.wav: %.1f s", mic.writer.durationSeconds))
-    log(String(format: "system.wav: %.1f s (%d callbacks)", systemWriter.durationSeconds, system.callbackCount))
+    log(String(format: "system.wav: %.1f s (%d callbacks, %d empty)",
+               systemWriter.durationSeconds, system.callbackCount, system.emptyCallbackCount))
+    // The first-sample gap is what shifts every Them timestamp; state it
+    // outright rather than leaving it to be derived from meta.json.
+    if let m = mic.firstSampleHostTime, let s = system.firstSampleHostTime {
+        let gap = machToSeconds(s) - machToSeconds(m)
+        log(String(format: "timing: first sample gap %+.3f s (%@ started later)",
+                   gap, gap >= 0 ? "system" : "mic"))
+    } else {
+        log("timing: first sample gap unavailable (a stream delivered no audio)")
+    }
     log("meta.json written")
     exit(0)
 }

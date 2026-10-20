@@ -72,6 +72,14 @@ final class SystemTapCapture {
     private let lock = NSLock()
     private var _firstHostTime: UInt64?
     private var _callbacks = 0
+    private var _emptyCallbacks = 0
+
+    /// Per-step wall time of `start()`, in the order the steps ran.
+    /// The system tap routinely delivers its first sample seconds after the
+    /// mic (0.98 s / 7.0 s / 10.5 s measured), which shifts every `Them`
+    /// timestamp earlier than reality. Which of the five startup steps eats
+    /// that time is not inferable after the fact, so each one is timed.
+    private(set) var startStepMillis: [(String, Double)] = []
 
     /// Native sample rate of the tap stream (valid after start()).
     private(set) var nativeSampleRate: Double = 0
@@ -84,9 +92,22 @@ final class SystemTapCapture {
     var firstSampleHostTime: UInt64? { lock.lock(); defer { lock.unlock() }; return _firstHostTime }
     var callbackCount: Int { lock.lock(); defer { lock.unlock() }; return _callbacks }
 
+    /// Callbacks that arrived carrying no audio (warm-up or silence).
+    /// Previously invisible: `handle` returned before the counter, so "the tap
+    /// delivered nothing" and "the tap delivered empty buffers" looked alike.
+    var emptyCallbackCount: Int { lock.lock(); defer { lock.unlock() }; return _emptyCallbacks }
+
     init(writer: WavWriter) { self.writer = writer }
 
     func start() throws {
+        // Each step is timed: see `startStepMillis`.
+        var stepStart = CFAbsoluteTimeGetCurrent()
+        func mark(_ label: String) {
+            let now = CFAbsoluteTimeGetCurrent()
+            startStepMillis.append((label, (now - stepStart) * 1000))
+            stepStart = now
+        }
+
         // 1. Tap: everything except ourselves, stereo mixdown, private, unmuted.
         let exclude = ownProcessObjectID().map { [$0] } ?? []
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: exclude)
@@ -94,6 +115,7 @@ final class SystemTapCapture {
         desc.isPrivate = true
         desc.muteBehavior = .unmuted
         var st = AudioHardwareCreateProcessTap(desc, &tapID)
+        mark("createProcessTap")
         guard st == noErr else { throw CaptureError("AudioHardwareCreateProcessTap", st) }
 
         // 2. Tap format.
@@ -101,6 +123,7 @@ final class SystemTapCapture {
         var asbd = AudioStreamBasicDescription()
         var asbdSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         st = AudioObjectGetPropertyData(tapID, &fmtAddr, 0, nil, &asbdSize, &asbd)
+        mark("getTapFormat")
         guard st == noErr else { throw CaptureError("get kAudioTapPropertyFormat", st) }
         guard asbd.mFormatID == kAudioFormatLinearPCM,
               asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0,
@@ -131,6 +154,7 @@ final class SystemTapCapture {
             ]],
         ]
         st = AudioHardwareCreateAggregateDevice(aggDesc as CFDictionary, &aggID)
+        mark("createAggregateDevice")
         guard st == noErr else { throw CaptureError("AudioHardwareCreateAggregateDevice", st) }
 
         // 4. IOProc: input buffers carry the tap audio (interleaved float32).
@@ -138,18 +162,29 @@ final class SystemTapCapture {
             [weak self] _, inInputData, inInputTime, _, _ in
             self?.handle(inInputData, inInputTime)
         }
+        mark("createIOProc")
         guard st == noErr, procID != nil else { throw CaptureError("AudioDeviceCreateIOProcIDWithBlock", st) }
 
         // 5. Go. (First start triggers the "System Audio Recording" TCC prompt;
-        //    if denied, the stream runs but delivers silence.)
+        //    if denied, the stream runs but delivers silence. This call BLOCKS
+        //    while that dialog is on screen, which is the leading suspect for
+        //    the multi-second deltas — a timing here in the seconds, on a run
+        //    where the prompt appeared, confirms it.)
         st = AudioDeviceStart(aggID, procID)
+        mark("audioDeviceStart")
         guard st == noErr else { throw CaptureError("AudioDeviceStart", st) }
     }
 
     private func handle(_ abl: UnsafePointer<AudioBufferList>, _ time: UnsafePointer<AudioTimeStamp>) {
         guard let resampler else { return }
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: abl))
-        guard let first = buffers.first, first.mDataByteSize > 0, first.mData != nil else { return }
+        guard let first = buffers.first, first.mDataByteSize > 0, first.mData != nil else {
+            // Counted before returning: an empty callback is still the tap
+            // running. Without this, a tap delivering nothing but warm-up
+            // buffers is indistinguishable from one that never fired.
+            lock.lock(); _emptyCallbacks += 1; lock.unlock()
+            return
+        }
 
         // Downmix every channel of every buffer (interleaved or not) to mono.
         let frames = Int(first.mDataByteSize) / (4 * Int(max(1, first.mNumberChannels)))
