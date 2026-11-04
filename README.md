@@ -1,6 +1,8 @@
 # Oatmeal
 
-![Oatmeal logo](assets/branding/appIcon-iOS.png)
+<div align="center">
+  <img src="assets/branding/appIcon-iOS.png" alt="Oatmeal logo" width="200" height="200">
+</div>
 
 A tiny, private macOS app that records a 1:1 call — your voice and the other
 side's voice — and transcribes it **entirely on your Mac** into a **plain
@@ -65,11 +67,16 @@ release is published, the download link goes here.
 - **Stop Recording & Transcribe** after — it transcribes both sides **on your
   Mac** and writes a clean Markdown file to `~/Meetings/transcripts/`.
 - A **notification** pops up when the transcript is ready.
+- If a transcription is running too long (or got corrupted), **Stop
+  Transcription** in the **Check Active Transcriptions…** dialog kills it — a
+  confirmation alert first, then a "Transcription stopped" notification.
+- **Re-transcribe…** runs transcription again on a past recording, listed
+  newest-first — one whose audio was deleted shows as unavailable.
 
 You also get: **Change Storage Location…** (where recordings/transcripts go),
-**Open Folder ▸ Recordings / Transcripts**, **Check Active Transcriptions…**, and
-**Start Recording from Calendar…** (attaches the meeting title, attendees, and
-notes to the recording).
+**Open Folder ▸ Recordings / Transcripts**, **Check Active Transcriptions…**,
+**Re-transcribe…**, and **Start Recording from Calendar…** (attaches the
+meeting title, attendees, and notes to the recording).
 
 ### A few things to know
 

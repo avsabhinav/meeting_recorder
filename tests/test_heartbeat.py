@@ -14,6 +14,7 @@ from mr.heartbeat import (
     clear_transcribing_heartbeat,
     heartbeat_path,
     read_transcribing_heartbeat,
+    touch_transcribing_heartbeat,
     write_transcribing_heartbeat,
 )
 
@@ -28,24 +29,28 @@ def test_heartbeat_path() -> None:
     root = "/tmp/mr-test-root"
     assert heartbeat_path(root) == Path(root) / ".state" / "transcribing.json"
     assert HEARTBEAT_FILENAME == "transcribing.json"
-    assert HEARTBEAT_VERSION == 1
+    assert HEARTBEAT_VERSION == 2
 
 
 def test_write_then_read_roundtrip(tmp_path) -> None:
+    # v2 also carries the owning worker PID (None when the caller omits it).
     write_transcribing_heartbeat(str(tmp_path), STAMP, _fresh_iso())
     p = heartbeat_path(str(tmp_path))
     assert p.is_file()
     assert (tmp_path / ".state").is_dir()
     on_disk = json.loads(p.read_text(encoding="utf-8"))
     assert on_disk == {
-        "version": 1,
+        "version": 2,
         "stamp": STAMP,
         "out_root": str(Path(tmp_path).resolve()),
         "started_at": on_disk["started_at"],
+        "pid": None,
+        # Liveness starts at started_at and is refreshed by the worker.
+        "updated_at": on_disk["started_at"],
     }
     got = read_transcribing_heartbeat(str(tmp_path))
     assert got is not None
-    assert got["version"] == 1
+    assert got["version"] == 2
     assert got["stamp"] == STAMP
     assert got["out_root"] == str(Path(tmp_path).resolve())
     assert isinstance(got["started_at"], str)
@@ -141,10 +146,13 @@ def test_read_unparseable_started_at_returns_none(tmp_path) -> None:
     (d / "transcribing.json").write_text(
         json.dumps(
             {
-                "version": 1,
+                # Current schema version: this test must exercise the
+                # unparseable-timestamp path, not the wrong-version one.
+                "version": 2,
                 "stamp": STAMP,
                 "out_root": str(tmp_path),
                 "started_at": "not-a-timestamp",
+                "pid": None,
             }
         ),
         encoding="utf-8",
@@ -160,3 +168,49 @@ def test_write_is_overwrite_and_no_leftover_temp(tmp_path) -> None:
     assert leftovers == []
     got = read_transcribing_heartbeat(str(tmp_path))
     assert got is not None and got["stamp"] == "s2"
+
+
+# ---------------------------------------------------------------------------
+# updated_at: liveness refreshed by the worker
+# ---------------------------------------------------------------------------
+
+
+def _old_iso(seconds: float) -> str:
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+
+
+def test_long_run_with_fresh_updated_at_is_not_stale(tmp_path) -> None:
+    """A worker started 20 min ago but refreshed just now is still running."""
+    root = str(tmp_path)
+    write_transcribing_heartbeat(root, STAMP, _old_iso(1200), pid=4242)
+    assert read_transcribing_heartbeat(root) is None  # not yet refreshed: stale
+    assert touch_transcribing_heartbeat(root, STAMP, 4242) is True
+    got = read_transcribing_heartbeat(root)
+    assert got is not None and got["pid"] == 4242
+
+
+def test_stale_updated_at_is_stale(tmp_path) -> None:
+    root = str(tmp_path)
+    write_transcribing_heartbeat(root, STAMP, _old_iso(1200), pid=1)
+    touch_transcribing_heartbeat(root, STAMP, 1, now=_old_iso(600))
+    assert read_transcribing_heartbeat(root) is None
+
+
+def test_missing_updated_at_falls_back_to_started_at(tmp_path) -> None:
+    """Heartbeats written before updated_at existed still read correctly."""
+    p = heartbeat_path(str(tmp_path))
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({
+        "version": 2, "stamp": STAMP, "out_root": str(tmp_path),
+        "started_at": _fresh_iso(), "pid": 7,
+    }))
+    assert read_transcribing_heartbeat(str(tmp_path)) is not None
+
+
+def test_touch_never_recreates_or_steals(tmp_path) -> None:
+    root = str(tmp_path)
+    assert touch_transcribing_heartbeat(root, STAMP, 1) is False  # no file
+    assert not heartbeat_path(root).exists()
+    write_transcribing_heartbeat(root, STAMP, _fresh_iso(), pid=2)
+    assert touch_transcribing_heartbeat(root, STAMP, 1) is False  # other pid
+    assert touch_transcribing_heartbeat(root, "other-stamp", 2) is False

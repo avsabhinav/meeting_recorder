@@ -28,6 +28,7 @@ import platform
 import signal
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from datetime import UTC, datetime
@@ -47,8 +48,19 @@ from mr.core.output import (
     write_transcript,
 )
 from mr.core.schema import Segment, from_capture_dict
-from mr.core.transcribe import DEFAULT_MODEL, ModelNotCachedError, transcribe_audio
-from mr.heartbeat import clear_transcribing_heartbeat, write_transcribing_heartbeat
+from mr.core.transcribe import (
+    DEFAULT_MODEL,
+    ModelNotCachedError,
+    limit_mlx_cache,
+    release_whisper_model,
+    transcribe_audio,
+)
+from mr.heartbeat import (
+    clear_transcribing_heartbeat,
+    read_transcribing_heartbeat,
+    touch_transcribing_heartbeat,
+    write_transcribing_heartbeat,
+)
 from mr.state import clear_state, is_clear, is_stale, new_stamp, read_state, write_state
 
 app = typer.Typer(help="Local-first meeting recorder: capture and transcribe 1:1 calls.")
@@ -57,6 +69,24 @@ app = typer.Typer(help="Local-first meeting recorder: capture and transcribe 1:1
 #: stdout/stderr. Lives next to the WAVs so a failure is diagnosable from the
 #: recording dir alone.
 TRANSCRIBE_LOG_NAME = ".transcribe.log"
+
+#: Why this worker run should abort, or ``None`` for a normal run. Set ONLY by the
+#: ``_transcribe --reason`` CLI option; read by :func:`_write_failed_stub`.
+_STOP_REASON: str | None = None
+
+#: Stub filename suffix written when a run was stopped by the user.
+STOPPED_STUB_SUFFIX = ".STOPPED.md"
+
+#: How long the cancelled worker gets to exit before we stop waiting. SIGTERM
+#: terminates the process immediately (no handler is installed), but the
+#: process entry can be reaped slightly later; a tracked background job gets
+#: its own grace period, so we wait inside the budget rather than reporting a
+#: kill we cannot yet confirm.
+TRANSCRIBE_LINGER_SECONDS = 120.0
+
+#: Reason string written into the worker's ``.STOPPED.md`` stub when the stop
+#: command kills it.
+STOP_REASON_TEXT = "mr stop-transcribe"
 
 
 @app.callback()
@@ -192,6 +222,8 @@ def _transcribe_and_write(
     them = transcribe_audio(
         str(o / "system.wav"), speaker="Them", model=cfg.model, language=cfg.language
     )
+    # Whisper is done: free its weights + MLX cache before diarization loads.
+    release_whisper_model()
     # The two WAVs each start at their own first sample, so they must be put
     # on one timeline before the overlap-based echo rule can see an echo and
     # its original as concurrent. See _stream_start_offsets.
@@ -276,13 +308,26 @@ def _write_failed_stub(cfg: Config, stamp: str, out_dir: str, error: BaseExcepti
     itself cannot be written (never masks the original error).
     """
     path = _transcripts_dir(cfg) / f"{stamp}.FAILED.md"
+    cancelled = _STOP_REASON is not None
+    if cancelled:
+        # A user-cancelled run is not a failure: it must not be reported as one
+        # (no FAILED.md marker, no "transcription failed" notification), and an
+        # aborted run must not leave a partial transcript behind either.
+        path = _transcripts_dir(cfg) / f"{stamp}{STOPPED_STUB_SUFFIX}"
+        for stale in (f"{stamp}.FAILED.md", f"{stamp}.md"):
+            try:
+                (_transcripts_dir(cfg) / stale).unlink(missing_ok=True)
+            except OSError:
+                pass
     log_path = Path(out_dir) / TRANSCRIBE_LOG_NAME
     lines = [
-        f"# Transcription FAILED — {stamp}",
+        f"# Transcription stopped — {stamp}" if cancelled else f"# Transcription FAILED — {stamp}",
         "",
         f"- **Recording:** {out_dir}",
         f"- **Error:** {type(error).__name__}: {error}",
     ]
+    if cancelled:
+        lines.append(f"- **Stopped:** transcription was cancelled ({_STOP_REASON})")
     # The log only exists when the worker was spawned by `_spawn_transcription`
     # (which creates it); running `mr _transcribe` by hand writes to the
     # terminal instead. Don't point the user at a file that isn't there.
@@ -304,6 +349,33 @@ def _write_failed_stub(cfg: Config, stamp: str, out_dir: str, error: BaseExcepti
     return path
 
 
+#: How often the worker refreshes its heartbeat's ``updated_at``. Well inside
+#: ``mr.heartbeat.DEFAULT_MAX_AGE_SECONDS`` (300 s), so a live worker never
+#: reads as stale; previously the heartbeat was written once and a run longer
+#: than 5 min disappeared from the menu, `stop-transcribe` could not find it,
+#: and `retranscribe` could start a second worker on the same stamp.
+HEARTBEAT_REFRESH_SECONDS = 30.0
+
+
+def _start_heartbeat_refresher(
+    out_root: str, stamp: str, pid: int, interval: float = HEARTBEAT_REFRESH_SECONDS
+) -> threading.Event:
+    """Refresh the heartbeat every ``interval`` s on a daemon thread.
+
+    Returns the stop event; set it to end the thread. The touch only rewrites
+    a heartbeat this worker (stamp + pid) still owns, so it never recreates a
+    cleared one or overwrites a newer worker's.
+    """
+    stop = threading.Event()
+
+    def _run() -> None:
+        while not stop.wait(interval):
+            touch_transcribing_heartbeat(out_root, stamp, pid)
+
+    threading.Thread(target=_run, name="mr-heartbeat", daemon=True).start()
+    return stop
+
+
 def _transcribe_worker(
     cfg: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False
 ) -> Path:
@@ -321,7 +393,14 @@ def _transcribe_worker(
     deleted afterwards — only on success, so a retry still has its audio.
     """
     utc_now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    write_transcribing_heartbeat(cfg.out_root, stamp, utc_now)
+    # Bound MLX's buffer cache for the whole worker: uncapped it reached ~10 GB
+    # and pushed the worker into swap on a busy machine (looked like a hang).
+    limit_mlx_cache()
+    # A cancelled predecessor may not have run its `finally` yet; the pid match
+    # makes this clear address THAT worker's heartbeat, never a different one.
+    clear_transcribing_heartbeat(cfg.out_root, stamp, pid=os.getpid())
+    write_transcribing_heartbeat(cfg.out_root, stamp, utc_now, pid=os.getpid())
+    refresher = _start_heartbeat_refresher(cfg.out_root, stamp, os.getpid())
     try:
         md = _transcribe_and_write(cfg, stamp, out_dir, json_sidecar=json_sidecar)
     except ModelNotCachedError as e:
@@ -337,12 +416,16 @@ def _transcribe_worker(
         _write_failed_stub(cfg, stamp, out_dir, e)
         raise typer.Exit(code=1) from e
     finally:
-        clear_transcribing_heartbeat(cfg.out_root, stamp)
+        refresher.set()  # stop refreshing before the clear
+        # The pid match keeps a late `finally` from clobbering a newer
+        # worker's heartbeat for the same stamp.
+        clear_transcribing_heartbeat(cfg.out_root, stamp, pid=os.getpid())
 
     # A successful (re-)run clears any marker left by an earlier failure, so
     # the transcripts dir never shows a transcript and a FAILED stub for the
     # same stamp.
-    (_transcripts_dir(cfg) / f"{stamp}.FAILED.md").unlink(missing_ok=True)
+    for stale in (f"{stamp}.FAILED.md", f"{stamp}{STOPPED_STUB_SUFFIX}"):
+        (_transcripts_dir(cfg) / stale).unlink(missing_ok=True)
 
     if not cfg.keep_audio:
         for name in ("mic.wav", "system.wav"):
@@ -463,6 +546,167 @@ def _do_stop(cfg: Config, json_sidecar: bool) -> None:
         typer.echo("stopped recording; error: could not start background transcription", err=True)
 
 
+def _notify_transcription_stopped(stamp: str) -> None:
+    """Post a best-effort "transcription stopped" user notification.
+
+    Never raises, never blocks. Lives here (not in the app) because the
+    command can be run from the terminal as well as the app, and posting it
+    in the one place that performs the kill means the notification is never
+    duplicated. Same mechanism the repo used before the app moved to
+    ``UNUserNotificationCenter`` (see
+    ``menu-bar/Sources/Oatmeal/TranscriptNotifier.swift`` for the history).
+    """
+    script = f'display notification "Transcription of {stamp} was stopped." with title "Oatmeal"'
+    try:
+        subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
+    except Exception:
+        return
+
+
+def _do_stop_transcribe(cfg: Config, stamp: str | None = None) -> int:
+    """Stop the in-flight background transcription and say what happened.
+
+    Finds the transcribing worker via the heartbeat, signals exactly that
+    PID (plain SIGTERM; the worker installs no handler, so it dies
+    immediately), waits up to :data:`TRANSCRIBE_LINGER_SECONDS` for the
+    process entry to disappear, and clears the heartbeat — clearing the
+    file is exactly the "cancelled" signal the worker's own ``finally`` also
+    set out to produce. Returns a process exit code: 0 on success or
+    nothing-to-do, 1 when the heartbeat has no usable PID.
+    """
+    hb = read_transcribing_heartbeat(cfg.out_root)
+    if hb is None:
+        typer.echo("no transcription running")
+        return 0
+
+    active = hb.get("stamp")
+    if stamp is not None and stamp != active:
+        typer.echo(f"no transcription running for {stamp}")
+        return 0
+
+    pid = hb.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool):
+        typer.echo(f"cannot stop {active}: heartbeat has no pid", err=True)
+        return 1
+
+    def _pid_gone() -> bool:
+        """True if the PID is gone (``os.kill(pid, 0)`` finds no process).
+
+        Mirrors ``mr.state.is_stale``: only ``ProcessLookupError`` means
+        gone (a ``PermissionError`` from a sandboxed caller means alive).
+        A zombie still answers ``os.kill(pid, 0)``, so this alone cannot
+        tell an exited-but-unreaped child from a running worker.
+        """
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except OSError:
+            return False
+        return False
+
+    def _reapable_relative() -> int | None:
+        """PID of a child of ours that has exited but is not yet reaped.
+
+        A zombie still answers ``os.kill(pid, 0)``, so a liveness probe alone
+        cannot tell it from a running worker — and calling SIGTERM on it would
+        report success for a process that was already gone. ``ps`` answers this
+        on macOS but cannot be executed in every environment (a sandboxed shell
+        gets EPERM), so the check is done with ``waitpid`` instead: a grandchild
+        raises ``ChildProcessError`` (not ours — treat it as running and let the
+        signal path decide), while our own exited child is reported here.
+        """
+        try:
+            reaped_pid, _ = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            return None
+        except OSError:
+            return None
+        return pid if reaped_pid else None
+
+    if _pid_gone() or _reapable_relative() is not None:
+        clear_transcribing_heartbeat(cfg.out_root, active, pid=pid)
+        typer.echo(f"{active} already finished")
+        return 0
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        # Raced to death between the checks and the kill: same calm outcome.
+        clear_transcribing_heartbeat(cfg.out_root, active, pid=pid)
+        typer.echo(f"{active} already finished")
+        return 0
+
+    # Wait for the process to disappear (poll every 0.1 s inside the budget).
+    # An exited child of ours is reported by ``_reapable_relative()`` (which
+    # reaps it); a dead non-child PID is reported by the ``_pid_gone()`` probe.
+    deadline = time.monotonic() + TRANSCRIBE_LINGER_SECONDS
+    while True:
+        if time.monotonic() >= deadline:
+            break
+        reaped = _reapable_relative()
+        if reaped is not None or _pid_gone():
+            break
+        time.sleep(0.1)
+
+    # The PID match makes this safe even if the worker already replaced its
+    # own heartbeat (a re-transcribe of the same stamp).
+    clear_transcribing_heartbeat(cfg.out_root, active, pid=pid)
+    typer.echo(f"stopped transcription of {active}")
+    _notify_transcription_stopped(active)
+    return 0
+
+
+def _do_retranscribe(
+    cfg: Config, stamp: str, *, out_dir: str | None = None, json_sidecar: bool = False
+) -> int:
+    """Re-run the transcription of an existing recording (RT-4).
+
+    The recording directory is derived HERE — never by the caller — so the
+    CLI stays the single source of truth for the on-disk layout
+    (``<out_root>/recordings/<stamp>/``). ``out_dir`` exists purely as a test
+    seam; the Swift/menu-bar caller never passes it.
+
+    The WAVs are the precondition: a recording is transcribable only while
+    BOTH ``mic.wav`` and ``system.wav`` exist. When ``keep_audio`` is false,
+    ``stop`` deletes the WAVs after a successful transcription, so a later
+    re-transcribe simply has no audio left to re-read — refuse rather than
+    spawn a worker that is guaranteed to fail.
+
+    A fresh heartbeat for the same stamp means a live worker owns this
+    recording: never start a second one over a running one.
+
+    The worker is spawned detached (exactly like ``mr stop``), so the caller
+    returns immediately while transcription continues in the background.
+
+    The existing ``transcripts/<stamp>.md`` is deliberately NOT deleted or
+    truncated: the worker overwrites it on success, and a user's transcript
+    must never disappear because a re-run was attempted.
+
+    Returns a process exit code: 0 on successful spawn, 1 on validation or
+    spawn failure. All stdout output is plain one-line text (never a typer
+    Table/Panel — auto-detected ANSI would corrupt the caller's parsing).
+    """
+    rec = Path(out_dir) if out_dir is not None else _recordings_dir(cfg) / stamp
+    if not rec.is_dir():
+        typer.echo(f"no recording directory for {stamp}: {rec}", err=True)
+        return 1
+    if not (rec / "mic.wav").is_file() or not (rec / "system.wav").is_file():
+        # keep_audio deletes the WAVs after a successful transcription;
+        # without both, there is no audio left to transcribe.
+        typer.echo(f"recording {stamp} has no audio left (mic.wav/system.wav missing)", err=True)
+        return 1
+    hb = read_transcribing_heartbeat(cfg.out_root)
+    if hb is not None and hb.get("stamp") == stamp:
+        typer.echo(f"{stamp} is already transcribing", err=True)
+        return 1
+    if not _spawn_transcription(stamp, str(rec), json_sidecar=json_sidecar):
+        typer.echo("error: could not start background transcription", err=True)
+        return 1
+    typer.echo(f"retranscribing {stamp}")
+    return 0
+
+
 def _do_config_set(key: str, value: str) -> None:
     """Apply ``config set <key> <value>`` (v1.1: only ``out_root``).
 
@@ -527,9 +771,11 @@ def process(
         if not path.is_file():
             raise typer.BadParameter(f"{label} file not found: {path}")
 
+    limit_mlx_cache()
     try:
         you = transcribe_audio(str(mic), speaker="You", model=model, language=language)
         them = transcribe_audio(str(system), speaker="Them", model=model, language=language)
+        release_whisper_model()
     except ModelNotCachedError as e:
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(code=3) from e
@@ -573,8 +819,14 @@ def transcribe_worker(
     stamp: Annotated[str, typer.Argument(help="Recording stamp (folder name)")],
     out_dir: Annotated[str, typer.Argument(help="Recording dir holding mic.wav/system.wav")],
     json: Annotated[bool, typer.Option("--json", help="Also write a JSON sidecar")] = False,
+    reason: Annotated[
+        str | None,
+        typer.Option("--reason", help="Why this run was cancelled (internal)"),
+    ] = None,
 ) -> None:
     """Internal: transcribe a recording dir in the background (MB-BG)."""
+    global _STOP_REASON
+    _STOP_REASON = reason
     cfg = load_config()
     md = _transcribe_worker(cfg, stamp, out_dir, json_sidecar=json)
     typer.echo(f"wrote {md}")
@@ -639,6 +891,26 @@ def stop(
     background process and posts a completion notification when done.
     """
     _do_stop(load_config(), json)
+
+
+@app.command(name="stop-transcribe")
+def stop_transcribe(
+    stamp: Annotated[
+        str | None,
+        typer.Argument(help="Only stop if this stamp is the active transcription"),
+    ] = None,
+) -> None:
+    """Stop the in-flight background transcription (and say what happened)."""
+    raise typer.Exit(code=_do_stop_transcribe(load_config(), stamp))
+
+
+@app.command()
+def retranscribe(
+    stamp: Annotated[str, typer.Argument(help="Recording stamp (folder name)")],
+    json: Annotated[bool, typer.Option("--json", help="Also write a JSON sidecar")] = False,
+) -> None:
+    """Re-run the transcription of an existing recording."""
+    raise typer.Exit(code=_do_retranscribe(load_config(), stamp, json_sidecar=json))
 
 
 @app.command()

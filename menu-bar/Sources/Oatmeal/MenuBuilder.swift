@@ -14,6 +14,10 @@ final class MenuBuilder {
     /// the controller can find/retitle/repopulate its submenu in place.
     static let calendarMenuTag: Int = 708
 
+    /// Tag for the "Re-transcribe…" item (RT epic) so the controller can find
+    /// it without depending on its title.
+    static let reTranscribeTag: Int = 709
+
     /// Display text for the "Check Active Transcriptions…" result (MB-DISPLAY/D3).
     /// `nil` (no in-flight transcription) -> "None"; a stamp -> "<stamp> — transcribing…".
     static func transcriptionResultText(stamp: String?) -> String {
@@ -181,6 +185,22 @@ final class MenuBuilder {
         checkTranscriptions.target = target
         checkTranscriptions.isEnabled = isCLIAvailable
         menu.addItem(checkTranscriptions)
+
+        // Re-transcribe a past recording (RT epic): opens a picker of previous
+        // recordings (latest pre-selected); the chosen one is re-transcribed
+        // by the CLI.
+        // The controller implements this (wired in the follow-up task); using
+        // the string name keeps this file compiling on its own, exactly like
+        // the menu's other dynamic rows.
+        let reTranscribe = NSMenuItem(
+            title: "Re-transcribe…",
+            action: Selector(("reTranscribe:")),
+            keyEquivalent: ""
+        )
+        reTranscribe.tag = Self.reTranscribeTag
+        reTranscribe.target = target
+        reTranscribe.isEnabled = isCLIAvailable
+        menu.addItem(reTranscribe)
 
         // Storage location + folder access (MB-SW4): real actions. Both need
         // the CLI (the app never reads/writes config itself), so they are

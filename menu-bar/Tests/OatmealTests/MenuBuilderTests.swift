@@ -74,6 +74,25 @@ final class MenuBuilderTests: XCTestCase {
         XCTAssertTrue(item?.isEnabled ?? false)
     }
 
+    func testReTranscribeItemIsPresentTaggedAndEnabled() {
+        let item = idleMenu().item(withTag: MenuBuilder.reTranscribeTag)
+        XCTAssertEqual(item?.title, "Re-transcribe…")
+        XCTAssertTrue(item?.isEnabled ?? false)
+    }
+
+    func testReTranscribeSitsDirectlyBelowCheckTranscriptions() {
+        let titles = idleMenu().items.map(\.title)
+        guard let checkIndex = titles.firstIndex(of: "Check Active Transcriptions…") else {
+            return XCTFail("no Check Active Transcriptions… item: \(titles)")
+        }
+        XCTAssertEqual(titles[checkIndex + 1], "Re-transcribe…")
+    }
+
+    func testReTranscribeDisabledWithoutCLI() {
+        let menu = idleMenu(isCLIAvailable: false)
+        XCTAssertFalse(menu.item(withTag: MenuBuilder.reTranscribeTag)?.isEnabled ?? true)
+    }
+
     func testCalendarItemIsTaggedAndEnabledWithCLI() {
         let item = idleMenu().item(withTag: MenuBuilder.calendarMenuTag)
         XCTAssertEqual(item?.title, "Start Recording from Calendar…")

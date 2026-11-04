@@ -12,7 +12,9 @@ with a pointer to ``mr doctor`` when the model is not present in the cache.
 
 from __future__ import annotations
 
+import gc
 import os
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -198,3 +200,60 @@ def transcribe_audio(
     config = MlxWhisperConfig(model=model, language=language)
     transcriber = MlxWhisperTranscriber(config)
     return transcriber.transcribe(path, speaker=speaker)
+
+
+#: Cap on MLX's buffer cache. Uncapped, the cache is never returned to the OS
+#: and grew to 7.3 GB on a 41.7 min recording (9.8 GB peak footprint, invisible
+#: to RSS); at 512 MB the peak was 4.1 GB for ~6% more wall time. Measured with
+#: spike/profile_stages.py on 2026-11-04_1530.
+MLX_CACHE_LIMIT_BYTES = 512 * 1024 * 1024
+
+
+def _mx() -> Any | None:
+    try:
+        import mlx.core as mx  # lazy: only where transcription actually runs
+    except ImportError:  # pragma: no cover
+        return None
+    return mx
+
+
+def limit_mlx_cache(limit_bytes: int = MLX_CACHE_LIMIT_BYTES) -> None:
+    """Cap MLX's buffer cache for this process (best-effort, never raises)."""
+    mx = _mx()
+    if mx is None:
+        return
+    setter = getattr(mx, "set_cache_limit", None) or getattr(
+        getattr(mx, "metal", None), "set_cache_limit", None
+    )
+    if setter is not None:
+        try:
+            setter(limit_bytes)
+        except Exception:  # noqa: BLE001 - a missing cap must not stop transcription
+            pass
+
+
+def release_whisper_model() -> None:
+    """Drop mlx-whisper's process-wide cached model and return MLX memory.
+
+    ``mlx_whisper.transcribe.ModelHolder`` keeps the weights (~1.5 GB) for the
+    life of the process, so they would stay resident through diarization. A
+    no-op when mlx-whisper was never imported (tests inject a fake module).
+    The next ``transcribe`` simply reloads the model from the HF cache.
+    """
+    mod = sys.modules.get("mlx_whisper.transcribe")
+    holder = getattr(mod, "ModelHolder", None) if mod is not None else None
+    if holder is not None:
+        holder.model = None
+        holder.model_path = None
+    gc.collect()
+    mx = _mx()
+    clear = None
+    if mx is not None:
+        clear = getattr(mx, "clear_cache", None) or getattr(
+            getattr(mx, "metal", None), "clear_cache", None
+        )
+    if clear is not None:
+        try:
+            clear()
+        except Exception:  # noqa: BLE001
+            pass
