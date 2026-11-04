@@ -31,7 +31,7 @@ class Segment:
     existing positional construction keep working.
     """
 
-    speaker: str  # exactly "You" or "Them"
+    speaker: str  # "You" (mic); "Them" or "Speaker N" (system, when diarized)
     text: str
     start: float
     end: float

@@ -439,3 +439,22 @@ def test_echo_only_overlaps_after_shifting_is_detected() -> None:
     assert flagged(out)[0].speaker == "You"
     assert len(kept(out)) == 1
     assert kept(out)[0].speaker == "Them"
+
+
+# ---------------------------------------------------------------------------
+# Diarized system side: "Speaker N" segments count as echo sources too.
+# ---------------------------------------------------------------------------
+
+
+def test_echo_detected_against_diarized_speaker() -> None:
+    you = [seg("You", "the quarterly numbers are solid", 0.6, 3.4)]
+    them = [seg("Speaker 2", "the quarterly numbers are solid", 0.5, 3.5)]
+    out = merge_transcripts(you, them)
+    flagged = [s for s in out if s.speaker == "You"]
+    assert flagged and all(s.echo_suspected for s in flagged)
+    assert [s.speaker for s in out if not s.echo_suspected] == ["Speaker 2"]
+
+
+def test_diarized_speaker_sorts_before_you_at_equal_start() -> None:
+    out = merge_transcripts([seg("You", "alpha", 1.0, 2.0)], [seg("Speaker 1", "zeta", 1.0, 2.0)])
+    assert [s.speaker for s in out] == ["Speaker 1", "You"]

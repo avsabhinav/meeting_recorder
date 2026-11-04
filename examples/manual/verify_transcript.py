@@ -23,8 +23,14 @@ import re
 import sys
 from pathlib import Path
 
-# One line per segment, e.g. ``**You (00:00):** hello`` / ``**Them (01:07):** hi``.
-SEGMENT_RE = re.compile(r"^\*\*(You|Them) \((\d+):(\d+)\):\*\* (.*)$")
+# One line per segment, e.g. ``**You (00:00):** hello`` / ``**Them (01:07):** hi``
+# / ``**Speaker 2 (01:07):** hi`` (diarized system side).
+SEGMENT_RE = re.compile(r"^\*\*(You|Them|Speaker \d+) \((\d+):(\d+)\):\*\* (.*)$")
+
+
+def _side(speaker: str) -> str:
+    """``You`` for the mic; every system label (``Them``, ``Speaker N``) maps to ``Them``."""
+    return "You" if speaker == "You" else "Them"
 
 
 def _normalize(text: str) -> str:
@@ -74,9 +80,9 @@ def verify(segments: list[dict], meta: dict | None = None) -> list[dict]:
         )
         return results
 
-    speakers = {seg["speaker"] for seg in segments}
-    n_you = sum(1 for s in segments if s["speaker"] == "You")
-    n_them = sum(1 for s in segments if s["speaker"] == "Them")
+    speakers = {_side(seg["speaker"]) for seg in segments}
+    n_you = sum(1 for s in segments if _side(s["speaker"]) == "You")
+    n_them = sum(1 for s in segments if _side(s["speaker"]) == "Them")
     if "You" in speakers and "Them" in speakers:
         results.append(
             {
@@ -120,7 +126,7 @@ def verify(segments: list[dict], meta: dict | None = None) -> list[dict]:
     # No full echo: identical normalized text on both speakers → WARN.
     by_speaker: dict[str, set[str]] = {"You": set(), "Them": set()}
     for seg in segments:
-        by_speaker[seg["speaker"]].add(_normalize(seg["text"]))
+        by_speaker[_side(seg["speaker"])].add(_normalize(seg["text"]))
     overlap = by_speaker["You"] & by_speaker["Them"]
     if overlap:
         sample = sorted(overlap)[0]

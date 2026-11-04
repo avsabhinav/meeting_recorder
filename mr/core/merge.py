@@ -116,8 +116,8 @@ def _echo_matches(you: Segment, them: list[Segment], threshold_pct: float) -> li
         return []
     matches = []
     for t in them:
-        if t.speaker != "Them":
-            continue
+        if t.speaker == "You":
+            continue  # system side is "Them" or a diarized "Speaker N"
         t_text = t.text.strip()
         if not t_text:
             continue
@@ -210,8 +210,10 @@ def merge_transcripts(
     Only a segment with no word timings — which cannot be trimmed — is
     returned marked.
 
-    ``Them`` segments are never touched. Output is chronological; equal
-    ``start`` values order ``Them`` before ``You``, then by ``text``. Inputs
+    System-side segments (``Them``, or ``Speaker N`` when the system track
+    was diarized) are never touched and all count as echo sources. Output is
+    chronological; equal ``start`` values order the system side before
+    ``You``, then by ``text``. Inputs
     are not mutated; a new list of (possibly replaced) segments is returned.
 
     ``dedup_threshold`` must be in ``[0, 1]``; ``None`` is treated as 0.6.
@@ -231,5 +233,5 @@ def merge_transcripts(
         if trimmed is not None:
             merged.append(trimmed)
 
-    merged.sort(key=lambda s: (s.start, 0 if s.speaker == "Them" else 1, s.text))
+    merged.sort(key=lambda s: (s.start, 1 if s.speaker == "You" else 0, s.text))
     return merged

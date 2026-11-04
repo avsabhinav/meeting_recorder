@@ -38,6 +38,7 @@ import typer
 
 from mr.config import Config, load_config, set_out_root
 from mr.core.capture import assert_capture_bin
+from mr.core.diarize import DEFAULT_DIARIZATION_MODEL, assign_speakers, diarize_audio
 from mr.core.merge import merge_transcripts, shift_segments
 from mr.core.output import (
     render_transcript_json,
@@ -45,7 +46,7 @@ from mr.core.output import (
     write_json,
     write_transcript,
 )
-from mr.core.schema import from_capture_dict
+from mr.core.schema import Segment, from_capture_dict
 from mr.core.transcribe import DEFAULT_MODEL, ModelNotCachedError, transcribe_audio
 from mr.heartbeat import clear_transcribing_heartbeat, write_transcribing_heartbeat
 from mr.state import clear_state, is_clear, is_stale, new_stamp, read_state, write_state
@@ -152,6 +153,29 @@ def _transcripts_dir(cfg: Config) -> Path:
     return Path(cfg.out_root) / "transcripts"
 
 
+def _diarize_system(segments: list[Segment], wav: Path, model: str) -> list[Segment]:
+    """Relabel system-track ``segments`` as ``Speaker 1..N``; fail-soft.
+
+    Runs on ``system.wav``'s own timeline, so callers must call this BEFORE
+    ``shift_segments``. Any failure (model not cached, mlx-audio missing or
+    broken, bad audio) logs a warning to stderr — the worker's
+    ``.transcribe.log`` — and returns ``segments`` unchanged, so the
+    transcript falls back to a single ``Them`` and never fails because of
+    diarization.
+    """
+    try:
+        turns = diarize_audio(str(wav), model=model)
+        return assign_speakers(segments, turns)
+    except Exception as e:  # noqa: BLE001 - diarization must never sink a transcript
+        typer.echo(
+            f"warning: diarization failed ({type(e).__name__}: {e}); "
+            "remote speakers left as 'Them'",
+            err=True,
+        )
+        traceback.print_exc()  # to stderr -> .transcribe.log, for diagnosis
+        return list(segments)
+
+
 def _transcribe_and_write(
     cfg: Config, stamp: str, out_dir: str, *, json_sidecar: bool = False
 ) -> Path:
@@ -171,9 +195,13 @@ def _transcribe_and_write(
     # The two WAVs each start at their own first sample, so they must be put
     # on one timeline before the overlap-based echo rule can see an echo and
     # its original as concurrent. See _stream_start_offsets.
+    them_raw = list(them.segments)
+    if cfg.diarize:
+        # Before the shift: the diarizer's turns are on system.wav's timeline.
+        them_raw = _diarize_system(them_raw, o / "system.wav", cfg.diarization_model)
     mic_offset, system_offset = _stream_start_offsets(o)
     you_segments = shift_segments(list(you.segments), mic_offset)
-    them_segments = shift_segments(list(them.segments), system_offset)
+    them_segments = shift_segments(them_raw, system_offset)
     merged = merge_transcripts(
         you_segments,
         them_segments,
@@ -483,6 +511,16 @@ def process(
     out_dir: Annotated[
         Path | None, typer.Option("--out-dir", help="Directory for transcript.md/json")
     ] = None,
+    diarize: Annotated[
+        bool,
+        typer.Option(
+            "--diarize/--no-diarize",
+            help="Split the system side into Speaker 1..N (falls back to Them)",
+        ),
+    ] = True,
+    diarization_model: Annotated[
+        str, typer.Option("--diarization-model", help="HF diarization model id")
+    ] = DEFAULT_DIARIZATION_MODEL,
 ) -> None:
     """Transcribe both WAVs, merge with echo dedup, and write the transcript."""
     for label, path in (("--mic", mic), ("--system", system)):
@@ -496,10 +534,13 @@ def process(
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(code=3) from e
 
+    them_segments = list(them.segments)
+    if diarize:
+        them_segments = _diarize_system(them_segments, system, diarization_model)
     merged = merge_transcripts(
-        list(you.segments), list(them.segments), dedup_threshold=dedup_threshold
+        list(you.segments), them_segments, dedup_threshold=dedup_threshold
     )
-    duration = max((s.end for s in list(you.segments) + list(them.segments)), default=0.0)
+    duration = max((s.end for s in list(you.segments) + them_segments), default=0.0)
 
     out = out_dir or system.parent
     stamp = stamp or system.stem
@@ -641,6 +682,21 @@ def doctor(
                 typer.echo(f"error: failed to fetch model {cfg.model}: {e}", err=True)
                 raise typer.Exit(code=1) from e
             typer.echo(f"fetched {cfg.model}")
+
+    if cfg.diarize:
+        typer.echo(f"diarization model: {cfg.diarization_model}")
+        d_cached = _model_cached(cfg.diarization_model)
+        typer.echo(f"diarization model cached: {'yes' if d_cached else 'no'}")
+        if fetch_model and not d_cached:
+            try:
+                _fetch_model(cfg.diarization_model)
+            except Exception as e:  # network / HF errors — report, exit non-zero
+                typer.echo(
+                    f"error: failed to fetch diarization model {cfg.diarization_model}: {e}",
+                    err=True,
+                )
+                raise typer.Exit(code=1) from e
+            typer.echo(f"fetched {cfg.diarization_model}")
 
 
 config_app = typer.Typer(help="Inspect or update mr configuration.")

@@ -13,8 +13,28 @@ from pathlib import Path
 
 from mr.core.schema import Segment, format_ts
 
-SCHEMA_VERSION = 1
+#: v2: system-side ``speaker`` may be ``Speaker N`` (diarized); every segment
+#: carries ``track`` (``mic``/``system``) so consumers need not parse labels.
+SCHEMA_VERSION = 2
 PARTICIPANTS_LINE = "You (mic), Them (system)"
+
+
+def _track(speaker: str) -> str:
+    return "mic" if speaker == "You" else "system"
+
+
+def _label_key(label: str) -> tuple[int, str]:
+    """Order ``Speaker 2`` before ``Speaker 10``; non-numbered labels last."""
+    head, _, num = label.rpartition(" ")
+    return (int(num), head) if num.isdigit() else (1 << 30, label)
+
+
+def participants_line(segments: list[Segment]) -> str:
+    """``You (mic), Speaker 1, Speaker 2 (system)``; the fixed line when undiarized."""
+    system = sorted({s.speaker for s in segments if s.speaker != "You"}, key=_label_key)
+    if not system or system == ["Them"]:
+        return PARTICIPANTS_LINE
+    return f"You (mic), {', '.join(system)} (system)"
 
 #: Suffix appended to a segment the merge step suspects is echo of the other
 #: side's audio. Reaching the Markdown at all is now the exception: the merge
@@ -108,7 +128,7 @@ def render_transcript_md(
         f"# Meeting — {stamp}",
         "",
         f"- **Duration:** {_format_duration(duration_seconds)}",
-        f"- **Participants:** {PARTICIPANTS_LINE}",
+        f"- **Participants:** {participants_line(segments)}",
         f"- **Source:** {source_dir}",
         "",
         "## Transcript",
@@ -158,6 +178,7 @@ def render_transcript_json(
     for seg in segments:
         entry: dict = {
             "speaker": seg.speaker,
+            "track": _track(seg.speaker),
             "start": seg.start,
             "end": seg.end,
             "text": seg.text,

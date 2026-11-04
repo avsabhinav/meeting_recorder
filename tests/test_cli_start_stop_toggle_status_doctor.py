@@ -803,7 +803,10 @@ def test_doctor_fetch_model_not_cached(cfg, monkeypatch) -> None:
     result = runner.invoke(app, ["doctor", "--fetch-model"])
     assert result.exit_code == 0, result.output
     assert "fetched org/model" in result.output
-    assert fetched == ["org/model"]
+    # Diarization is on by default, so its model is fetched too.
+    assert fetched == ["org/model", "mlx-community/Nemotron-3-Diarization"]
+    assert "diarization model cached: no" in result.output
+    assert "fetched mlx-community/Nemotron-3-Diarization" in result.output
 
 
 def test_doctor_fetch_model_cached(cfg, monkeypatch) -> None:

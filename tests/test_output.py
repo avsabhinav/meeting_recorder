@@ -8,6 +8,8 @@ from datetime import date
 
 from mr.core.output import (
     ECHO_MARKER,
+    PARTICIPANTS_LINE,
+    participants_line,
     render_transcript_json,
     render_transcript_md,
     write_json,
@@ -170,17 +172,30 @@ def test_duration_formatting() -> None:
 def test_render_transcript_json() -> None:
     data = render_transcript_json(SEGMENTS, stamp="2026-08-24_1432")
     assert data == {
-        "schema_version": 1,
+        "schema_version": 2,
         "stamp": "2026-08-24_1432",
         "segments": [
-            {"speaker": "You", "start": 0.0, "end": 2.1, "text": "hey, can you hear me ok?"},
+            {
+                "speaker": "You",
+                "track": "mic",
+                "start": 0.0,
+                "end": 2.1,
+                "text": "hey, can you hear me ok?",
+            },
             {
                 "speaker": "Them",
+                "track": "system",
                 "start": 2.3,
                 "end": 5.8,
                 "text": "yeah, I hear you just fine.",
             },
-            {"speaker": "You", "start": 6.0, "end": 8.4, "text": "great, thanks!"},
+            {
+                "speaker": "You",
+                "track": "mic",
+                "start": 6.0,
+                "end": 8.4,
+                "text": "great, thanks!",
+            },
         ],
     }
 
@@ -254,18 +269,68 @@ def test_render_transcript_json_keeps_echo_suspected() -> None:
     assert data["segments"] == [
         {
             "speaker": "Them",
+            "track": "system",
             "start": 2.3,
             "end": 5.8,
             "text": "yeah, I hear you just fine.",
         },
         {
             "speaker": "You",
+            "track": "mic",
             "start": 2.5,
             "end": 5.9,
             "text": "yeah, I hear you just fine.",
             "echo_suspected": True,
         },
-        {"speaker": "You", "start": 6.0, "end": 8.4, "text": "great, thanks!"},
+        {
+            "speaker": "You",
+            "track": "mic",
+            "start": 6.0,
+            "end": 8.4,
+            "text": "great, thanks!",
+        },
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Diarized system side: Speaker 1..N
+# ---------------------------------------------------------------------------
+
+
+DIARIZED_SEGMENTS: list[Segment] = [
+    _seg("Speaker 2", 0.5, 1.5, "second voice"),
+    _seg("You", 1.6, 2.0, "me"),
+    _seg("Speaker 10", 2.1, 3.0, "tenth voice"),
+    _seg("Speaker 1", 3.1, 4.0, "first voice"),
+]
+
+
+def test_participants_line_lists_diarized_speakers_in_numeric_order() -> None:
+    assert participants_line(DIARIZED_SEGMENTS) == (
+        "You (mic), Speaker 1, Speaker 2, Speaker 10 (system)"
+    )
+
+
+def test_participants_line_undiarized_is_unchanged() -> None:
+    assert participants_line(SEGMENTS) == PARTICIPANTS_LINE
+    assert participants_line([_seg("You", 0.0, 1.0, "solo")]) == PARTICIPANTS_LINE
+
+
+def test_render_transcript_md_diarized_labels() -> None:
+    md = render_transcript_md(
+        stamp="s", source_dir="d", segments=DIARIZED_SEGMENTS, duration_seconds=60
+    )
+    assert "- **Participants:** You (mic), Speaker 1, Speaker 2, Speaker 10 (system)\n" in md
+    assert "**Speaker 2 (00:00):** second voice" in md
+
+
+def test_render_transcript_json_diarized_track() -> None:
+    data = render_transcript_json(DIARIZED_SEGMENTS, stamp="s")
+    assert [(e["speaker"], e["track"]) for e in data["segments"]] == [
+        ("Speaker 2", "system"),
+        ("You", "mic"),
+        ("Speaker 10", "system"),
+        ("Speaker 1", "system"),
     ]
 
 
