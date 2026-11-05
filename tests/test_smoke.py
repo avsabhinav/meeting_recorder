@@ -3,7 +3,7 @@ import mr.core
 
 
 def test_version():
-    assert mr.__version__ == "0.1.0"
+    assert mr.__version__ == "0.1.1"
 
 
 def test_core_imports():

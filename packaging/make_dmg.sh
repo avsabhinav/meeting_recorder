@@ -29,7 +29,7 @@ cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
 # --- Version: read from pyproject.toml, fall back to a constant. -----------
-VERSION="0.1.0"
+VERSION="0.1.1"
 if [[ -f pyproject.toml ]]; then
   V="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' pyproject.toml | head -n1)"
   if [[ -n "${V:-}" ]]; then

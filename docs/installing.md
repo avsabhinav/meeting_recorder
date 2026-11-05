@@ -64,12 +64,12 @@ What it does, in order:
 4. **Writes the image** to `dist/Oatmeal-<version>.dmg` with `hdiutil`
    (compressed UDZO) and opens a Finder drag window.
 
-**Output:** `dist/Oatmeal-0.1.0.dmg` (version comes from `pyproject.toml`).
+**Output:** `dist/Oatmeal-0.1.1.dmg` (version comes from `pyproject.toml`).
 
 ### Verify the DMG
 
 ```sh
-hdiutil verify dist/Oatmeal-0.1.0.dmg
+hdiutil verify dist/Oatmeal-0.1.1.dmg
 ```
 
 ### Notes & options
