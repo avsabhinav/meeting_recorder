@@ -74,7 +74,9 @@ You need:
 
 ### 1. Install the app
 
-1. Download **`Oatmeal-<version>.dmg`** and double-click it.
+1. Download **`Oatmeal-<version>.dmg`** from the
+   [latest release](https://github.com/avsabhinav/meeting_recorder/releases/latest)
+   and double-click it.
 2. Drag **`Oatmeal.app`** onto the **Applications** shortcut in the window that
    opens.
 3. Eject the disk image.
@@ -115,9 +117,10 @@ That's it, you're set up.
 <details>
 <summary><b>Where do I get the DMG?</b></summary>
 
-The DMG is built from this repo with `./packaging/make_dmg.sh` (see the
-[technical guide](docs/installing.md#2-building-the-dmg-from-source)). When a
-release is published, the download link goes here.
+From the [Releases page](https://github.com/avsabhinav/meeting_recorder/releases/latest).
+Each release also lists the DMG's SHA-256 checksum. You can build it yourself
+with `./packaging/make_dmg.sh` (see the
+[technical guide](docs/installing.md#2-building-the-dmg-from-source)).
 </details>
 
 ---
