@@ -3,6 +3,10 @@ import Foundation
 /// Reader for the Python-written transcription heartbeat
 /// (`<out_root>/.state/transcribing.json`, see `mr/heartbeat.py`).
 ///
+/// Schema version 2 (the current `mr.heartbeat.HEARTBEAT_VERSION`) adds the
+/// owning worker's `pid` to the payload; version 1 predates that field and is
+/// treated as stale.
+///
 /// NOTE: the menu app must point `baseURL` at the current `out_root`
 /// (`mr config`'s `out_root`, default `~/Meetings`) — the heartbeat is written
 /// under whatever `out_root` is in effect, and `mr status` does not print it
@@ -16,6 +20,9 @@ struct TranscriptionState {
     struct Heartbeat {
         let stamp: String
         let startedAt: Date?
+        /// Owning worker PID (heartbeat v2). `nil` when the writer omitted it;
+        /// `mr stop-transcribe` needs it to signal exactly that process.
+        let pid: Int?
     }
 
     /// Base directory under which `.state/transcribing.json` lives (the
@@ -32,30 +39,41 @@ struct TranscriptionState {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        // Schema version must match `mr.heartbeat.HEARTBEAT_VERSION` (1).
-        guard obj["version"] as? Int == 1 else { return nil }
+        // Schema version must match `mr.heartbeat.HEARTBEAT_VERSION` (now 2).
+        // Version 1 predates the `pid` field and is treated as stale.
+        guard obj["version"] as? Int == 2 else { return nil }
         guard let stamp = obj["stamp"] as? String else { return nil }
         guard let startedAt = obj["started_at"] as? String else { return nil }
+        guard let s = TranscriptionState.parseTimestamp(startedAt) else { return nil }
 
+        // Liveness: the worker refreshes `updated_at` every ~30 s, so a long
+        // transcription is not reported idle after `maxAgeSeconds`. Older
+        // heartbeats without it fall back to `started_at` (mirrors
+        // `mr.heartbeat.read_transcribing_heartbeat`).
+        var liveAt = s
+        if let updatedAt = obj["updated_at"] as? String {
+            guard let u = TranscriptionState.parseTimestamp(updatedAt) else { return nil }
+            liveAt = u
+        }
+        let age = Date().timeIntervalSince(liveAt)
+        guard age <= maxAgeSeconds else { return nil }
+        // v2: owning worker PID. Present-and-an-integer yields it; missing,
+        // explicit null, or a non-integer (string/float/bool) yields nil.
+        // Never rejects the heartbeat on its own.
+        let pid = obj["pid"] as? Int
+        return Heartbeat(stamp: stamp, startedAt: s, pid: pid)
+    }
+
+    /// Parse an ISO8601 timestamp: with a zone (fractional seconds optional),
+    /// else a NAIVE local timestamp — e.g. a heartbeat written before the
+    /// Python side standardized on UTC-"Z" — read as wall-clock local time.
+    static func parseTimestamp(_ s: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        var started = formatter.date(from: startedAt)
-        if started == nil {
-            formatter.formatOptions = [.withInternetDateTime]
-            started = formatter.date(from: startedAt)
-        }
-        // Fallback for a NAIVE local timestamp (no zone) — e.g. a heartbeat
-        // written before the Python side standardized on UTC-"Z". Interpret it
-        // as wall-clock local time. This keeps the reader robust across either
-        // form.
-        if started == nil {
-            started = TranscriptionState.parseNaiveLocalISO8601(startedAt)
-        }
-        guard let s = started else { return nil }
-
-        let age = Date().timeIntervalSince(s)
-        guard age <= maxAgeSeconds else { return nil }
-        return Heartbeat(stamp: stamp, startedAt: s)
+        if let d = formatter.date(from: s) { return d }
+        formatter.formatOptions = [.withInternetDateTime]
+        if let d = formatter.date(from: s) { return d }
+        return parseNaiveLocalISO8601(s)
     }
 
     /// Parse a timezone-less local timestamp like `2026-10-12T16:45:57` or

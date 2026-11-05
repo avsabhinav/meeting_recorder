@@ -16,10 +16,18 @@ import UserNotifications
 /// Trade-off of this split: nothing is posted while Oatmeal is not running.
 /// The transcript still lands on disk — only the notification is missed.
 ///
+/// The notifier also posts the "stopped" notification, so all app-owned
+/// notifications come from one place.
+///
 /// Read-only: never writes, moves, or deletes anything under `out_root`.
 final class TranscriptNotifier {
     /// `userInfo` key holding the transcript path a notification refers to.
     static let transcriptPathKey = "transcriptPath"
+
+    /// `userInfo` key holding the stamp a "stopped" notification refers to.
+    /// There is no file to open, so unlike `transcriptPathKey` it is not used
+    /// as a click target.
+    static let stampKey = "stamp"
 
     /// Notification-category identifier (lets the delegate recognize ours).
     static let categoryIdentifier = "transcript-ready"
@@ -153,6 +161,17 @@ final class TranscriptNotifier {
         return ("Transcript ready", "\(stamp) — click to open.")
     }
 
+    /// Title/body for the "transcription stopped" notification. Pure
+    /// (testable): no posting, no file I/O. An empty or blank stamp degrades to
+    /// wording with no stamp in it rather than printing an empty placeholder.
+    static func stoppedNotificationText(stamp: String) -> (title: String, body: String) {
+        let trimmed = stamp.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ("Transcription stopped", "The transcription was stopped. Re-run it from Re-transcribe…")
+        }
+        return ("Transcription stopped", "\(trimmed) was stopped. Re-run it from Re-transcribe…")
+    }
+
     private func notify(for url: URL) {
         let (title, body) = Self.notificationText(for: url.lastPathComponent)
         let content = UNMutableNotificationContent()
@@ -164,6 +183,30 @@ final class TranscriptNotifier {
 
         let request = UNNotificationRequest(
             identifier: url.path,  // one notification per transcript
+            content: content,
+            trigger: nil  // deliver immediately
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Posts the "transcription stopped" notification for `stamp`.
+    ///
+    /// Called by the controller after `mr stop-transcribe` succeeds — the app
+    /// owns this notification so it carries Oatmeal's identity, unlike the
+    /// best-effort `osascript` one the CLI posts when the command is run from a
+    /// terminal. The request identifier is per-stamp, matching how a transcript
+    /// notification is keyed, so re-stopping the same stamp replaces the banner
+    /// instead of stacking a second one.
+    static func postTranscriptionStopped(stamp: String) {
+        let (title, body) = stoppedNotificationText(stamp: stamp)
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = categoryIdentifier
+        content.userInfo = [stampKey: stamp]
+        let request = UNNotificationRequest(
+            identifier: "stopped:\(stamp)",
             content: content,
             trigger: nil  // deliver immediately
         )

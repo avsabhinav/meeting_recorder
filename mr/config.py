@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from mr.core.diarize import DEFAULT_DIARIZATION_MODEL
 from mr.core.transcribe import DEFAULT_MODEL
 
 #: Default location of the config file (resolved per-user at load time).
@@ -38,6 +39,9 @@ class Config:
     language: str
     dedup_threshold: float
     keep_audio: bool
+    #: Split the system track into ``Speaker 1..N`` (falls back to ``Them``).
+    diarize: bool = True
+    diarization_model: str = DEFAULT_DIARIZATION_MODEL
 
 
 def _resolve_out_root(value: object) -> str:
@@ -66,10 +70,14 @@ def _dedup_threshold(value: object) -> float:
     return threshold
 
 
-def _keep_audio(value: object) -> bool:
+def _bool(key: str, value: object) -> bool:
     if not isinstance(value, bool):
-        raise ValueError(f"keep_audio must be a boolean, got {type(value).__name__}")
+        raise ValueError(f"{key} must be a boolean, got {type(value).__name__}")
     return value
+
+
+def _keep_audio(value: object) -> bool:
+    return _bool("keep_audio", value)
 
 
 def default_config() -> Config:
@@ -80,6 +88,8 @@ def default_config() -> Config:
         language=DEFAULT_LANGUAGE,
         dedup_threshold=DEFAULT_DEDUP_THRESHOLD,
         keep_audio=True,
+        diarize=True,
+        diarization_model=DEFAULT_DIARIZATION_MODEL,
     )
 
 
@@ -108,6 +118,8 @@ def load_config(path: str | Path | None = None) -> Config:
     language = data.get("language")
     dedup_threshold = data.get("dedup_threshold")
     keep_audio = data.get("keep_audio")
+    diarize = data.get("diarize")
+    diarization_model = data.get("diarization_model")
 
     return Config(
         out_root=_resolve_out_root(out_root) if out_root is not None else defaults.out_root,
@@ -123,6 +135,12 @@ def load_config(path: str | Path | None = None) -> Config:
             else defaults.dedup_threshold
         ),
         keep_audio=_keep_audio(keep_audio) if keep_audio is not None else defaults.keep_audio,
+        diarize=_bool("diarize", diarize) if diarize is not None else defaults.diarize,
+        diarization_model=(
+            _nonempty_str("diarization_model", diarization_model)
+            if diarization_model is not None
+            else defaults.diarization_model
+        ),
     )
 
 
@@ -197,6 +215,8 @@ def set_out_root(path: str, *, config_path: str | Path | None = None) -> str:
             "language": defaults.language,
             "dedup_threshold": defaults.dedup_threshold,
             "keep_audio": defaults.keep_audio,
+            "diarize": defaults.diarize,
+            "diarization_model": defaults.diarization_model,
         }
     data["out_root"] = new_root
 

@@ -85,6 +85,27 @@ struct MRCLI {
         return try invoke(args)
     }
     func stop() throws -> (out: String, exit: Int32) { try invoke(["stop"]) }
+    /// `mr stop-transcribe [stamp]` — stop the in-flight background
+    /// transcription. With `stamp` (RT epic, menu "Stop Transcription" when a
+    /// heartbeat is showing), the CLI stops nothing unless that stamp is the
+    /// active one. Prints one of: `no transcription running`,
+    /// `no transcription running for <stamp>`, `<stamp> already finished`,
+    /// `stopped transcription of <stamp>`.
+    func stopTranscribe(stamp: String? = nil) throws -> (out: String, exit: Int32) {
+        var args = ["stop-transcribe"]
+        if let stamp, !stamp.isEmpty {
+            args.append(stamp)
+        }
+        return try invoke(args)
+    }
+    /// `mr retranscribe <stamp>` — re-run the transcription of an existing
+    /// recording. Exit 0 (stdout `retranscribing <stamp>`) starts a DETACHED
+    /// worker, so the caller returns immediately; a non-zero exit carries the
+    /// CLI's one-line reason on stdout (unknown stamp, audio already deleted,
+    /// already transcribing, or a failed spawn).
+    func retranscribe(_ stamp: String) throws -> (out: String, exit: Int32) {
+        try invoke(["retranscribe", stamp])
+    }
     func setOutRoot(_ dir: String) throws -> (out: String, exit: Int32) {
         try invoke(["config", "set", "out_root", dir])
     }

@@ -166,6 +166,8 @@ The entry point is `mr` (installed by `pip install -e .`).
 | `mr status` | Show whether a capture is active (pid, output dir, stamp) and the last transcript. |
 | `mr process` | Transcribe an existing `--mic`/`--system` WAV pair (no capture needed). |
 | `mr doctor` | Check the environment (macOS version, helper binary, model cache). |
+| `mr stop-transcribe` | Stop a running transcription. |
+| `mr retranscribe` | Re-run transcription of a past recording. |
 
 ### `mr toggle`
 
@@ -243,12 +245,40 @@ Prints the macOS version, `out_root`, the helper binary path (or
 model, and whether it is cached. With `--fetch-model`, downloads the model
 into the standard Hugging Face cache if it is not already present.
 
+### `mr stop-transcribe`
+
+```
+mr stop-transcribe [stamp]
+```
+
+Stops a running transcription. Prints exactly one line, and exits 0 in each
+case: `no transcription running` (nothing in progress), `no transcription
+running for <stamp>`, `<stamp> already finished` (the process had ended before
+the stop reached it), or `stopped transcription of <stamp>`. Exits 1 only when
+the heartbeat carries no PID. A stopped run leaves
+`transcripts/<stamp>.STOPPED.md` describing the cancellation — it does **not**
+write the `.FAILED.md` "transcription failed" marker.
+
+### `mr retranscribe`
+
+```
+mr retranscribe <stamp>
+```
+
+Re-runs transcription of a past recording in a detached background worker.
+Prints `retranscribing <stamp>` and exits 0 once the worker is started. Exits
+1 with a one-line reason if the stamp is unknown, the recording's WAVs
+(`mic.wav` / `system.wav`) are gone, a transcription is already running for
+that stamp, or the spawn fails. The worker overwrites `transcripts/<stamp>.md`
+when it finishes (it never deletes an existing transcript early) and removes
+any `.FAILED.md` marker on success.
+
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Success (including `mr stop` with nothing to stop, and `mr start` when already recording). |
-| `1` | `mr doctor --fetch-model` failed to download the model (network/HF error). |
+| `1` | `mr doctor --fetch-model` failed to download the model (network/HF error); `mr stop-transcribe` heartbeat with no PID; `mr retranscribe` failure (unknown stamp, WAVs gone, already running, or spawn failed). |
 | `2` | Usage / parameter error (e.g. `--mic` file not found, bad `--dedup-threshold`). |
 | `3` | Model not cached (offline cache-only transcription). Fix: `mr doctor --fetch-model`, then re-run `mr stop` (state is intentionally kept so you can retry). |
 
@@ -399,6 +429,13 @@ menu (no polling).
 - **Manual test + permissions:** see
   [docs/menu-bar-manual-test.md](menu-bar-manual-test.md) — the app is the
   responsible process for the Microphone / System Audio TCC prompts.
+- **New menu actions need a re-frozen CLI.** The app prefers the frozen CLI
+  embedded in `Oatmeal.app/Contents/Resources/mr-cli/` (see
+  `AppInfo.mrCandidates()`), so the **Stop Transcription** button and
+  **Re-transcribe…** menu row only exist inside a packaged app after you re-run
+  `packaging/freeze_cli.sh` (or `packaging/make_dmg.sh`, which re-freezes from
+  source). A source checkout that runs the app with `MR_PYTHON` set uses the
+  live Python and needs no re-freeze.
 
 ---
 

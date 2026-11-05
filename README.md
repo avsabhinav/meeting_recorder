@@ -1,17 +1,43 @@
-# Oatmeal
+<p align="center">
+  <img src="assets/branding/appIcon-iOS.png" alt="Oatmeal logo" width="128" height="128">
+</p>
 
-![Oatmeal logo](assets/branding/appIcon-iOS.png)
+<h1 align="center">Oatmeal</h1>
 
-A tiny, private macOS app that records a 1:1 call — your voice and the other
-side's voice — and transcribes it **entirely on your Mac** into a **plain
-Markdown file**, every line labeled `You` or `Them`.
-
-No cloud, no account, no LLM on your behalf. The transcript stays on your
-machine.
+<p align="center">
+  A tiny, private macOS menu-bar app that records your calls and turns them into
+  a clean Markdown transcript, <b>entirely on your Mac</b>.
+</p>
 
 ---
 
-## Recording Consent & Legal Disclaimer
+## What it does
+
+- **Records both sides of a call:** your microphone and the audio coming out of
+  your speakers (Zoom, Teams, Meet, a phone call on your Mac, anything).
+- **Transcribes it on your Mac** with a local speech model. No cloud, no
+  account, no upload.
+- **Tells you who said what.** Your lines are labelled `You`. The other side is
+  split into `Speaker 1`, `Speaker 2`, ... so a group call reads like a real
+  conversation, not one long block.
+- **Writes a plain Markdown file** you can read, search, drop into Obsidian, or
+  hand to your own AI assistant.
+
+A transcript looks like this:
+
+```markdown
+- **Participants:** You (mic), Speaker 1, Speaker 2 (system)
+
+**Speaker 1 (02:13):** Can you assign someone to support this?
+
+**Speaker 2 (02:21):** It'll likely be Vinit, but I'll check his plate first.
+
+**You (02:26):** Sounds good, loop me in on that chat.
+```
+
+---
+
+## Recording consent & legal disclaimer
 
 **Important:** Oatmeal records and transcribes audio from your microphone and
 system audio. Many jurisdictions have laws requiring consent from some or all
@@ -32,26 +58,64 @@ By using this software, you acknowledge and agree that:
 
 ---
 
-## Get the app
+## Before you start
 
-Download **Oatmeal-<version>.dmg**, then:
+You need:
 
-1. **Open the DMG** — a volume named **Oatmeal** mounts.
-2. **Drag `Oatmeal.app` into the Applications** shortcut.
-3. **Launch** it from your **menu bar** (top-right of your screen — it has no
-   Dock icon).
-4. **Grant two permissions** when prompted (Microphone + System Audio) so it can
-   hear both sides of the call.
+- A Mac with **Apple Silicon** (M1 or newer).
+- **macOS 14.2** or later.
+- About 4 GB of free disk space for the speech models (downloaded once).
+- An internet connection **once**, to download those models. After that,
+  Oatmeal works fully offline.
 
-That's it. The app lives in your menu bar.
+---
 
-> **First launch:** this build isn't notarized, so macOS may say it "can't be
-> opened". Fix it once: **right-click `Oatmeal.app` → Open → Open**.
+## Install (about 5 minutes)
+
+### 1. Install the app
+
+1. Download **`Oatmeal-<version>.dmg`** and double-click it.
+2. Drag **`Oatmeal.app`** onto the **Applications** shortcut in the window that
+   opens.
+3. Eject the disk image.
+
+> **"Oatmeal can't be opened"?** This build isn't notarized by Apple yet, so
+> macOS blocks the very first launch. Fix it once: in **Applications**,
+> **right-click `Oatmeal.app` → Open → Open**. Normal launches work after that.
+
+### 2. Download the speech models (one time)
+
+Open **Terminal** (press `⌘ Space`, type *Terminal*, press Return) and paste:
+
+```bash
+/Applications/Oatmeal.app/Contents/Resources/mr-cli/mr-cli doctor --fetch-model
+```
+
+This downloads the transcription model (about 3 GB) and the speaker-separation
+model (about 400 MB) into your local model cache. It can take a few minutes.
+When it finishes, it prints a `fetched ...` line for each model. To double-check,
+run the same command again: it should show `model cached: yes` and
+`diarization model cached: yes`. You can close Terminal.
+
+> It may also print `helper: MISSING`. That's expected when run from Terminal:
+> the app supplies its recording helper itself.
+
+### 3. Launch and allow two permissions
+
+Open **Oatmeal** from Applications. It has **no Dock icon**: look for its icon
+in the **menu bar** at the top-right of your screen.
+
+The first time you record, macOS asks for two permissions. Allow both:
+
+- **Microphone**: to hear you.
+- **System Audio Recording**: to hear the other side of the call.
+
+That's it, you're set up.
 
 <details>
 <summary><b>Where do I get the DMG?</b></summary>
 
-The DMG is produced from the repo with `./packaging/make_dmg.sh` (see the
+The DMG is built from this repo with `./packaging/make_dmg.sh` (see the
 [technical guide](docs/installing.md#2-building-the-dmg-from-source)). When a
 release is published, the download link goes here.
 </details>
@@ -60,48 +124,91 @@ release is published, the download link goes here.
 
 ## Use it
 
-- **Start Recording** before a call — it records your mic (You) and the other
-  person's voice through your speakers (Them).
-- **Stop Recording & Transcribe** after — it transcribes both sides **on your
-  Mac** and writes a clean Markdown file to `~/Meetings/transcripts/`.
-- A **notification** pops up when the transcript is ready.
+### Record a call
 
-You also get: **Change Storage Location…** (where recordings/transcripts go),
-**Open Folder ▸ Recordings / Transcripts**, **Check Active Transcriptions…**, and
-**Start Recording from Calendar…** (attaches the meeting title, attendees, and
-notes to the recording).
+1. Click the Oatmeal icon in the menu bar and choose **Start Recording** just
+   before your call. (Or **Start Recording from Calendar...** to attach the
+   meeting's title, attendees and notes.)
+2. Have your call as usual.
+3. When it's over, choose **Stop Recording & Transcribe**.
+4. Oatmeal transcribes in the background. You can start another recording right
+   away. A **notification** appears when the transcript is ready; click it to
+   open the file.
 
-### A few things to know
+Transcripts go to `~/Meetings/transcripts/`. Use **Open Folder ▸ Transcripts**
+to get there, or **Change Storage Location...** to put them somewhere else.
 
-- **Private by default.** Recording, transcription, and the transcript all stay
-  on your Mac.
-- **Your format.** Plain Markdown — drop it into an Obsidian vault or point your
-  agent at the folder. No lock-in.
-- **Which permissions and why.** See the [permissions
-  quick-guide](docs/installing.md#7-permissions). If a track comes out silent,
-  a permission is usually denied — see [docs/permissions-troubleshooting.md](docs/permissions-troubleshooting.md).
-- **Where files land.** `~/Meetings/recordings/<stamp>/` (WAVs + meta) and
-  `~/Meetings/transcripts/<stamp>.md` — see [Output
-  layout](docs/installing.md#8-output-layout).
+### Other things in the menu
+
+- **Check Active Transcriptions...**: see what's being transcribed. If one is
+  taking too long, **Stop Transcription** cancels it (you'll be asked to
+  confirm).
+- **Re-transcribe...**: run transcription again on a past recording, for
+  example after an update. Recordings whose audio was deleted show as
+  unavailable.
+- **Open Folder ▸ Recordings / Transcripts**: jump to your files in Finder.
+
+### How speaker labels work
+
+- **`You`** is always your microphone.
+- **`Speaker 1`, `Speaker 2`, ...** are the other voices on the call, numbered
+  in the order they first speak. Oatmeal tells voices apart, but it doesn't
+  know names, so `Speaker 1` in one meeting isn't the same person as
+  `Speaker 1` in another.
+- If speaker separation can't run (for example, its model isn't downloaded),
+  you still get a full transcript. The other side is simply labelled `Them`.
+- Want one `Them` label instead? Add `diarize = false` to
+  `~/.config/mr/config.toml`.
+
+---
+
+## If something goes wrong
+
+| What you see | What to do |
+| --- | --- |
+| macOS says Oatmeal "can't be opened" | Right-click `Oatmeal.app` → **Open** → **Open** (once). |
+| One side of the call is missing or silent | A permission is usually off. Check **System Settings → Privacy & Security → Microphone** and **System Audio Recording**, then see [permissions troubleshooting](docs/permissions-troubleshooting.md). |
+| The other side is all `Them`, not `Speaker 1/2/...` | The speaker model isn't downloaded. Run step 2 of the install again. |
+| A transcript never shows up | Look in the transcripts folder for a `<stamp>.FAILED.md` note; it explains what happened and how to retry. You can also use **Re-transcribe...**. |
+
+---
+
+## Private by design
+
+- **Everything stays on your Mac:** the audio, the transcription and the
+  transcript. Nothing is uploaded.
+- **No AI summaries on your behalf.** Oatmeal produces a faithful, attributed
+  transcript. What you do with it is up to you.
+- **No lock-in.** Plain Markdown files in a folder you choose.
+
+Files live in `~/Meetings/recordings/<stamp>/` (the audio) and
+`~/Meetings/transcripts/<stamp>.md` (the transcript). See
+[Output layout](docs/installing.md#8-output-layout) for details.
 
 ---
 
 ## For technical folks
 
-The full reference lives in **[docs/installing.md](docs/installing.md)** —
-a technical deep dive covering:
+The full reference lives in **[docs/installing.md](docs/installing.md)**:
 
-- **Build the DMG from source** (`./packaging/make_dmg.sh`) — §2
-- **Install & use the `mr` CLI** from a source checkout — §3
-- **The complete `mr` CLI reference** (`toggle`/`start`/`stop`/`status`/`process`/`doctor`)
-  and exit codes — §4
-- **Configuration** (`~/.config/mr/config.toml`) — §5
-- **Bind `mr toggle` to a hotkey** (Shortcuts / Raycast) — §6
-- **Permissions deep-dive** — §7
-- **Output layout** — §8
-- **Meeting context & Obsidian frontmatter (calendar)** — §9
-- **The `Oatmeal` menu-bar app** (build/install) — §10
-- **Project layout & development** — §11
+- Build the DMG from source (`./packaging/make_dmg.sh`): §2
+- Install and use the `mr` CLI from a source checkout: §3
+- The complete `mr` CLI reference and exit codes: §4
+- Configuration (`~/.config/mr/config.toml`), including `diarize` and
+  `diarization_model`: §5
+- Bind `mr toggle` to a hotkey (Shortcuts / Raycast): §6
+- Permissions deep-dive: §7
+- Output layout: §8
+- Meeting context & Obsidian frontmatter (calendar): §9
+- The Oatmeal menu-bar app (build/install): §10
+- Project layout & development: §11
+
+Under the hood: transcription uses
+[Whisper large-v3-turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo)
+and speaker separation uses
+[NVIDIA Nemotron 3 Diarization](https://huggingface.co/mlx-community/Nemotron-3-Diarization),
+both running locally on Apple's MLX framework. See
+[docs/architecture.md](docs/architecture.md) for the design.
 
 ---
 
@@ -110,16 +217,11 @@ a technical deep dive covering:
 I built this to solve a small problem of my own: meeting-summary apps are packed
 with features I never asked for, and the summaries they produce are only as good
 as the context behind them. A summary only "sees" the meeting; the person who
-actually has context is **you** — your notes, memory, and vault.
+actually has context is **you**: your notes, memory, and vault.
 
 So Oatmeal does one deliberately small thing well: it captures a faithful,
-clearly-attributed transcript of a 1:1 call and hands the thinking to **your own
+clearly attributed transcript of a call and hands the thinking to **your own
 agent** (or your own review), where the real context lives.
-
-- **Private by default.** Everything local.
-- **Your format.** Plain Markdown, no lock-in.
-- **Built for your workflow.** A raw conversation your agent can sort through
-  with the context only you (and it) have.
 
 ## License
 

@@ -15,3 +15,11 @@ dedup_threshold = 0.6
 
 # Keep the raw WAV files after transcription (true = re-processable).
 keep_audio = true
+
+# Split the remote (system) side into Speaker 1, Speaker 2, ... with a local
+# diarization model. On any diarization failure the transcript falls back to
+# a single "Them" speaker (see recordings/<stamp>/.transcribe.log).
+diarize = true
+
+# Diarization model (Hugging Face repo id, loaded via mlx-audio).
+diarization_model = "mlx-community/Nemotron-3-Diarization"

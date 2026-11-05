@@ -38,6 +38,10 @@ final class StatusItemController: NSObject {
     /// Set on the main thread just before the submenu pops; read only there.
     private var pendingMeetingEvents: [MeetingEvent] = []
 
+    /// Stamp shown in the "Check Active Transcriptions…" alert, set just before
+    /// `runModal` so the Stop button knows what to stop. Main thread only.
+    private var pendingStopStamp: String?
+
     /// Whether `mr` can be resolved (fixed at launch; resolving once avoids a
     /// `which mr` subprocess on every menu open).
     private let cliAvailable: Bool
@@ -253,6 +257,9 @@ final class StatusItemController: NSObject {
 
                 let alert = NSAlert()
                 alert.alertStyle = .informational
+                // Fresh stamp for this alert (a stale one must never be reused);
+                // cleared again after the modal in case the user never stops.
+                self.pendingStopStamp = nil
                 if let heartbeat {
                     alert.messageText = "Transcription in progress"
                     var detail = MenuBuilder.transcriptionResultText(stamp: heartbeat.stamp)
@@ -262,14 +269,171 @@ final class StatusItemController: NSObject {
                     }
                     detail += "\n\nThe transcript appears in the transcripts folder when it finishes."
                     alert.informativeText = detail
+                    alert.addButton(withTitle: "Stop Transcription")
+                    alert.addButton(withTitle: "OK")
+                    pendingStopStamp = heartbeat.stamp
                 } else {
                     alert.messageText = "No active transcription"
                     alert.informativeText =
                         MenuBuilder.transcriptionResultText(stamp: nil) +
                         "\n\nIf a recording finished without producing a transcript, check " +
                         "the transcripts folder for a `.FAILED.md` file."
+                    alert.addButton(withTitle: "OK")
                 }
-                alert.runModal()
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn, let stamp = self.pendingStopStamp {
+                    self.stopActiveTranscription(stamp)
+                }
+                self.pendingStopStamp = nil
+                self.statusItem.button?.needsDisplay = true
+            }
+        }
+    }
+
+    /// "Stop Transcription" (first button of the "Check Active Transcriptions…"
+    /// alert) → `mr stop-transcribe <stamp>` on a background queue. Exit 0
+    /// (incl. "already finished") posts the app-branded "Transcription stopped"
+    /// notification and confirms in an alert; any other outcome warns.
+    private func stopActiveTranscription(_ stamp: String) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Fresh MRCLI inside the closure: no shared-state races with the
+            // main thread (invocation is re-resolved; that is fine).
+            var failure: (title: String, detail: String)? = nil
+            do {
+                let (out, exit) = try MRCLI().stopTranscribe(stamp: stamp)
+                if exit == 0 {
+                    // Honest and useful in the "already finished" case: the CLI
+                    // line ("\<stamp> already finished") goes in the alert too.
+                    TranscriptNotifier.postTranscriptionStopped(stamp: stamp)
+                    var detail = "Transcription stopped for \(stamp)."
+                    let outLine = out.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !outLine.isEmpty { detail += "\n\n\(outLine)" }
+                    self?.showStoppedAlert(detail: detail)
+                } else {
+                    failure = ("Could not stop transcription",
+                               out.isEmpty ? "mr stop-transcribe failed." : out)
+                }
+            } catch {
+                if let e = error as? MRCLIError {
+                    switch e {
+                    case .mrUnavailable:
+                        failure = ("Could not stop transcription",
+                                   "Neither a 'mr' command on PATH nor the MR_PYTHON environment " +
+                                   "variable is available to this app. Start the app with MR_PYTHON " +
+                                   "set, or install mr on PATH.")
+                    case .processTimeout:
+                        failure = ("Could not stop transcription",
+                                   "The mr CLI did not finish within the timeout.")
+                    }
+                } else {
+                    failure = ("Could not stop transcription", "The mr CLI could not be launched.")
+                }
+            }
+            guard let self else { return }
+            DispatchQueue.main.async {
+                if let failure {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = failure.title
+                    alert.informativeText = failure.detail
+                    alert.runModal()
+                }
+                self.statusItem.button?.needsDisplay = true
+            }
+        }
+    }
+
+    /// Shows the informational "Transcription stopped" confirmation. Always
+    /// called on the main thread.
+    private func showStoppedAlert(detail: String) {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "Transcription stopped"
+            alert.informativeText = detail
+            alert.runModal()
+            self?.statusItem.button?.needsDisplay = true
+        }
+    }
+
+    /// "Re-transcribe…" (menu row, tag 709 — disabled when the CLI is
+    /// unavailable; `MenuBuilder` sets that). Resolves the storage root OFF the
+    /// main thread, then pops the recording picker; the dialog itself handles
+    /// the no-recordings case.
+    @objc func reTranscribe(_ sender: Any?) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let root = StorageLocation.currentRoot()
+            DispatchQueue.main.async {
+                if root == nil {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "Cannot re-transcribe"
+                    alert.informativeText =
+                        "The mr CLI is unavailable, so the current storage location is unknown."
+                    alert.runModal()
+                } else {
+                    ReTranscribeDialog.present(root: root!) { stamp in
+                        self.reTranscribe(stamp)
+                    }
+                }
+                self.statusItem.button?.needsDisplay = true
+            }
+        }
+    }
+
+    /// Recording picker chose a stamp (already on the main thread) →
+    /// `mr retranscribe <stamp>` on a background queue. Exit 0 spawns a
+    /// DETACHED worker and returns promptly; the transcript lands in the
+    /// transcripts folder when the worker finishes.
+    private func reTranscribe(_ stamp: String) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Fresh MRCLI inside the closure: no shared-state races with the
+            // main thread (invocation is re-resolved; that is fine).
+            var failure: (title: String, detail: String)? = nil
+            var success = false
+            do {
+                let (out, exit) = try MRCLI().retranscribe(stamp)
+                if exit == 0 {
+                    success = true
+                } else {
+                    failure = ("Could not re-transcribe",
+                               out.isEmpty ? "mr retranscribe failed." : out)
+                }
+            } catch {
+                if let e = error as? MRCLIError {
+                    switch e {
+                    case .mrUnavailable:
+                        failure = ("Could not re-transcribe",
+                                   "Neither a 'mr' command on PATH nor the MR_PYTHON environment " +
+                                   "variable is available to this app. Start the app with MR_PYTHON " +
+                                   "set, or install mr on PATH.")
+                    case .processTimeout:
+                        failure = ("Could not re-transcribe",
+                                   "The mr CLI did not finish within the timeout.")
+                    }
+                } else {
+                    failure = ("Could not re-transcribe", "The mr CLI could not be launched.")
+                }
+            }
+            guard let self else { return }
+            DispatchQueue.main.async {
+                if success {
+                    let alert = NSAlert()
+                    alert.alertStyle = .informational
+                    alert.messageText = "Re-transcribing"
+                    alert.informativeText =
+                        "Re-transcribing \(stamp). The transcript lands in the transcripts " +
+                        "folder when it finishes."
+                    alert.runModal()
+                }
+                if let failure {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = failure.title
+                    alert.informativeText = failure.detail
+                    alert.runModal()
+                }
                 self.statusItem.button?.needsDisplay = true
             }
         }

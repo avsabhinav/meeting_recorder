@@ -121,3 +121,24 @@ def test_load_config_accepts_posix_path(tmp_path) -> None:
     assert load_config(str(p)).model == "m"
     assert load_config(p).model == "m"
     assert isinstance(load_config(p), Config)
+
+
+def test_diarization_defaults_and_overrides(tmp_path) -> None:
+    cfg = default_config()
+    assert cfg.diarize is True
+    assert cfg.diarization_model == "mlx-community/Nemotron-3-Diarization"
+    p = tmp_path / "config.toml"
+    p.write_text('diarize = false\ndiarization_model = "local/diar"\n')
+    cfg = load_config(p)
+    assert cfg.diarize is False
+    assert cfg.diarization_model == "local/diar"
+
+
+def test_invalid_diarization_keys_raise(tmp_path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text('diarize = "yes"\n')
+    with pytest.raises(ValueError, match="diarize"):
+        load_config(p)
+    p.write_text('diarization_model = ""\n')
+    with pytest.raises(ValueError, match="diarization_model"):
+        load_config(p)

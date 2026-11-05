@@ -30,6 +30,20 @@ from mr.state import RecordingState
 
 runner = CliRunner()
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_BOX_CHARS = "│╭╮╰╯─"
+
+
+def _plain(output: str) -> str:
+    """typer's error panel as plain text: no ANSI colors, box borders or wrapping.
+
+    On CI (GitHub Actions) rich forces color and draws an 80-column box, so a
+    long message gains escape codes and borders and can wrap mid-phrase.
+    """
+    text = _ANSI_RE.sub("", output)
+    text = text.translate({ord(c): " " for c in _BOX_CHARS})
+    return " ".join(text.split())
+
 
 @pytest.fixture()
 def cfg(tmp_path, monkeypatch) -> Config:
@@ -124,7 +138,7 @@ def test_start_with_invalid_context_json(cfg, tmp_path, monkeypatch) -> None:
     missing = tmp_path / "nope.json"
     result = runner.invoke(app, ["start", "--context-json", str(missing)])
     assert result.exit_code == 2, result.output
-    assert "--context-json file not found or invalid" in result.output
+    assert "--context-json file not found or invalid" in _plain(result.output)
 
 
 def test_start_already_recording(cfg, monkeypatch) -> None:
@@ -803,7 +817,10 @@ def test_doctor_fetch_model_not_cached(cfg, monkeypatch) -> None:
     result = runner.invoke(app, ["doctor", "--fetch-model"])
     assert result.exit_code == 0, result.output
     assert "fetched org/model" in result.output
-    assert fetched == ["org/model"]
+    # Diarization is on by default, so its model is fetched too.
+    assert fetched == ["org/model", "mlx-community/Nemotron-3-Diarization"]
+    assert "diarization model cached: no" in result.output
+    assert "fetched mlx-community/Nemotron-3-Diarization" in result.output
 
 
 def test_doctor_fetch_model_cached(cfg, monkeypatch) -> None:

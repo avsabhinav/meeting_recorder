@@ -21,7 +21,8 @@ mr/
   core/
     schema.py     # Segment, Word, TranscriptionResult, CaptureMeta
     transcribe.py # Transcriber protocol + MlxWhisperTranscriber (mlx-whisper)
-    merge.py      # interleave You/Them by time + echo dedup (rapidfuzz)
+    diarize.py    # Nemotron 3 Diarization (mlx-audio): system track -> Speaker 1..N
+    merge.py      # interleave You/system by time + echo dedup (rapidfuzz)
     output.py     # .md + optional JSON
     capture.py    # Python wrapper: spawn/signal mr-capture, read meta.json
 capture/          # SwiftPM package -> mr-capture binary
@@ -68,7 +69,14 @@ examples/demo/    # sample aligned WAVs + generated .md
    use the **standard HF hub cache**; never a custom cache_dir. At call time run
    **cache-only** (`HF_HUB_OFFLINE=1`, `local_files_only`). Pre-fetch + report via
    `mr doctor`. If model absent → `ModelNotCachedError` with a clear message.
-4. **Deterministic attribution:** mic→`You`, system→`Them` (stream origin). No LLM.
+4. **Deterministic attribution:** mic→`You` (stream origin). The system track
+   is split into `Speaker 1`, `Speaker 2`, … by a local diarization model
+   (`mlx-community/Nemotron-3-Diarization` via `mlx-audio`, config
+   `diarize`/`diarization_model`); labels are arrival-order ids, numbered by
+   first spoken word, never names. Any diarization failure (model not cached,
+   import error, bad audio) or `diarize = false` falls back to a single `Them`,
+   with a warning in `.transcribe.log` — a transcript never fails because of
+   diarization. No LLM.
 5. **Settings locked** (from spike): `language=en, word_timestamps=True,
    condition_on_previous_text=False, no_speech_threshold=0.6,
    hallucination_silence_threshold=0.0`; drop empty-text segments.
@@ -109,6 +117,17 @@ examples/demo/    # sample aligned WAVs + generated .md
    owns its own error reporting; see step 6.
 3. Background `mr _transcribe` writes the `transcribing.json` heartbeat, then
    `transcribe` both tracks (sequential) → `TranscriptionResult`s.
+3b. **System-track diarization** (`mr/core/diarize.py`, decision #4), run on
+   `system.wav`'s own timeline, i.e. BEFORE the alignment shift in 3a.
+   `diarize_audio` returns speaker turns; `assign_speakers` gives each Whisper
+   word the speaker at its midpoint, snaps mid-sentence speaker changes to the
+   nearest `. ? !` within 3 words (never across a >0.3 s pause), folds ≤2-word
+   fragments into the speaker they are glued to (complete short sentences such
+   as "Yeah." are kept), and splits Whisper segments only where the speaker
+   changes. Diarized speakers with no words are dropped before numbering.
+   Tuned on two real recordings in `spike/nemotron_diarize_them.py`. The
+   `mlx_audio` import stubs `mlx_audio.vad.models.smart_turn`, whose import
+   chain otherwise pulls in `transformers` → `torch`.
 3a. **Track alignment.** The mic and the system tap do not start together, and
    each WAV begins at its own first sample as if that sample were t=0 — so the
    two tracks share no timeline. `_stream_start_offsets(out_dir)` reads the two
@@ -123,8 +142,9 @@ examples/demo/    # sample aligned WAVs + generated .md
    chronologically, with echoed `You` **words** trimmed out (decision #2). A
    trimmed segment carries `echo_suspected=False` and tightened `start`/`end`;
    a wholly-echoed one is dropped; one with no word timings is returned
-   `echo_suspected=True` for the writers in step 5 to mark. `Them` segments are
-   never touched.
+   `echo_suspected=True` for the writers in step 5 to mark. System-side
+   segments (`Them` or `Speaker N`) are never touched; all of them count as
+   echo sources.
 5. `output` → `~/Meetings/transcripts/<stamp>.md` (+ optional JSON sidecar).
    If `recordings/<stamp>/meeting_context.json` exists (loaded by
    `_transcribe_and_write`), the `.md` gets an **Obsidian YAML frontmatter**

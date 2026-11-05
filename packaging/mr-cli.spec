@@ -2,10 +2,11 @@
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('/Users/abhinavademmagari/Documents/Projects/meeting recorder/.venv/lib/python3.12/site-packages/mlx/lib/mlx.metallib', 'mlx/lib'), ('/Users/abhinavademmagari/Documents/Projects/meeting recorder/.venv/lib/python3.12/site-packages/mlx_whisper/assets', 'mlx_whisper/assets')]
+datas = [('/Users/abhinavademmagari/Documents/Projects/meeting recorder/.venv/lib/python3.12/site-packages/mlx/lib/mlx.metallib', 'mlx/lib'), ('/Users/abhinavademmagari/Documents/Projects/meeting recorder/.venv/lib/python3.12/site-packages/mlx_whisper/assets', 'mlx_whisper/assets'), ('/Users/abhinavademmagari/Documents/Projects/meeting recorder/.venv/lib/python3.12/site-packages/mlx_audio', 'mlx_audio')]
 binaries = []
-hiddenimports = []
+hiddenimports = ['mlx_audio.vad.models.nemotron_diarization']
 hiddenimports += collect_submodules('mlx_whisper')
+hiddenimports += collect_submodules('mlx_audio.vad')
 tmp_ret = collect_all('mlx')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
@@ -19,7 +20,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'torchgen'],
+    excludes=['torch', 'torchgen', 'transformers', 'tokenizers', 'sentencepiece'],
     noarchive=False,
     optimize=0,
 )

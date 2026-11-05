@@ -99,6 +99,61 @@ final class MRCLITests: XCTestCase {
         }
     }
 
+    func testStopTranscribeWithoutStampBuildsBareArg() throws {
+        let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
+                          canned: ("stopped transcription of 2026-10-22_1440", 0))
+        let (out, exit) = try cli.stopTranscribe()
+        XCTAssertEqual(out, "stopped transcription of 2026-10-22_1440")
+        XCTAssertEqual(exit, 0)
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertEqual(call.args, ["stop-transcribe"])
+    }
+
+    func testStopTranscribeWithStampAppendsStamp() throws {
+        let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
+                          canned: ("no transcription running for 2026-10-22_1440", 0))
+        let (out, exit) = try cli.stopTranscribe(stamp: "2026-10-22_1440")
+        XCTAssertEqual(out, "no transcription running for 2026-10-22_1440")
+        XCTAssertEqual(exit, 0)
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertEqual(call.args, ["stop-transcribe", "2026-10-22_1440"])
+    }
+
+    func testStopTranscribeEmptyStampIgnored() throws {
+        let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
+                          canned: ("no transcription running", 0))
+        _ = try cli.stopTranscribe(stamp: "")
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertEqual(call.args, ["stop-transcribe"])
+    }
+
+    func testRetranscribeBuildsArgs() throws {
+        let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
+                          canned: ("retranscribing 2026-10-22_1044", 0))
+        let (out, exit) = try cli.retranscribe("2026-10-22_1044")
+        XCTAssertEqual(out, "retranscribing 2026-10-22_1044")
+        XCTAssertEqual(exit, 0)
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertEqual(call.args, ["retranscribe", "2026-10-22_1044"])
+    }
+
+    func testRetranscribeNonZeroExitIsReturnedNotThrown() throws {
+        let cli = makeCLI(invocation: .executable("/usr/local/bin/mr"),
+                          canned: ("no recording for 2026-10-22_1044", 1))
+        let (out, exit) = try cli.retranscribe("2026-10-22_1044")
+        XCTAssertEqual(out, "no recording for 2026-10-22_1044")
+        XCTAssertEqual(exit, 1)
+    }
+
+    func testPythonInvocationPrefixForStopTranscribe() throws {
+        let cli = makeCLI(invocation: .python("/venv/bin/python"),
+                          canned: ("no transcription running", 0))
+        _ = try cli.stopTranscribe(stamp: "2026-10-22_1440")
+        let call = try XCTUnwrap(Self.lastCall)
+        XCTAssertEqual(call.exe.path, "/venv/bin/python")
+        XCTAssertEqual(call.args, ["-m", "mr.cli", "stop-transcribe", "2026-10-22_1440"])
+    }
+
     func testMRStatusParseRecording() {
         let stdout = """
         recording: yes

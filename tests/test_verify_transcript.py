@@ -108,3 +108,14 @@ def test_verify_meta_samples():
 
     bad = verify(segs, meta={"mic": {"samples_written": 0}, "system": {"samples_written": 2000}})
     assert _status(bad, "meta_samples") == ["FAIL", "PASS"]
+
+
+def test_diarized_speaker_lines_parse_and_count_as_system_side():
+    text = (
+        "**You (00:00):** hello there\n\n"
+        "**Speaker 1 (00:05):** hi, how are you\n\n"
+        "**Speaker 2 (00:09):** morning all\n"
+    )
+    segs = parse_transcript(text)
+    assert [s["speaker"] for s in segs] == ["You", "Speaker 1", "Speaker 2"]
+    assert _status(verify(segs), "both_speakers") == ["PASS"]
