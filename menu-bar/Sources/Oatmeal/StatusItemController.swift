@@ -33,6 +33,9 @@ final class StatusItemController: NSObject {
 
     private var isLiveRecording = false
 
+    /// Floating side pill shown while recording; clicking it stops the recording.
+    private let floatingIndicator = FloatingRecordingIndicator()
+
     /// Events fetched by `startRecordingFromCalendar`, indexed by the row tag
     /// of the dynamic submenu items so selection maps back to the meeting.
     /// Set on the main thread just before the submenu pops; read only there.
@@ -55,6 +58,7 @@ final class StatusItemController: NSObject {
         self.cliAvailable = AppInfo.resolveMrInvocation() != nil
         super.init()
         self.menuBuilder.target = self
+        floatingIndicator.onClick = { [weak self] in self?.stopRecording(nil) }
 
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePressed(_:))
@@ -71,6 +75,7 @@ final class StatusItemController: NSObject {
     ///   recording privacy indicator also appears; it is kept, never hidden.)
     private func setLive(_ live: Bool) {
         isLiveRecording = live
+        if live { floatingIndicator.show() } else { floatingIndicator.hide() }
         guard let button = statusItem.button else { return }
         // Two-state swap: `icon-white` (template) when idle, `icon-recording`
         // (full-color, non-template) while recording. No tint is applied in
