@@ -15,7 +15,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1</string>
+	<string>0.1.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Oatmeal records the microphone during a call for local transcription.</string>
 	<key>NSAudioCaptureUsageDescription</key>
