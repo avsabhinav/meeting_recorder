@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oatmeal: private meeting transcripts on your Mac</title>
+  <meta name="description" content="Oatmeal records your calls and turns them into a clean Markdown transcript, entirely on your Mac. Free, no account, no cloud.">
+  <meta property="og:title" content="Oatmeal: there's one microphone, keep it private">
+  <meta property="og:description" content="Free, private meeting transcripts that never leave your Mac.">
+  <meta property="og:image" content="assets/icon-256.png">
+  <link rel="icon" type="image/png" href="assets/favicon-64.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="Oatmeal home">
+        <img src="assets/icon-256.png" alt="" width="32" height="32">
+        <span>Oatmeal</span>
+      </a>
+      <nav aria-label="Sections">
+        <a href="#trip">Privacy</a>
+        <a href="#how">How it works</a>
+        <a href="#install">Install</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/avsabhinav/meeting_recorder">GitHub</a>
+      </nav>
+      <a class="btn btn-small" href="https://github.com/avsabhinav/meeting_recorder/releases/latest">Download</a>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- HERO -->
+    <section class="hero" id="top">
+      <div class="wrap hero-grid">
+        <h1 class="hero-title">There’s one microphone.<br>Keep it private.</h1>
+
+        <div class="hero-copy">
+          <p class="lede">Notetaker apps are fighting over your mic. Oatmeal only wants it for one thing: a transcript of your call, written on your Mac and saved as a file you own. Nothing is uploaded. There’s no account. It’s free.</p>
+          <a class="btn" href="https://github.com/avsabhinav/meeting_recorder/releases/latest">Download for Mac</a>
+          <p class="cta-note">Free and open source. Apple Silicon, macOS 14.2 or later.</p>
+          <p class="cta-mobile">Oatmeal runs on a Mac. Open this page there to download it.</p>
+        </div>
+
+        <div class="scene" role="img" aria-label="A Mac desktop during a video call. Oatmeal's floating pill sits at the edge of the screen with a moving waveform, while a transcript fills in line by line.">
+          <div class="scene-menubar">
+            <span class="mb-app"><b>Meeting</b> File Edit View Window</span>
+            <span class="mb-right"><img src="assets/icon-white-96.png" alt="" width="14" height="14"><span>Thu 2:32 PM</span></span>
+          </div>
+
+          <div class="call">
+            <div class="win-bar"><span class="lights"><i></i><i></i><i></i></span><span>Weekly sync</span></div>
+            <div class="tiles">
+              <div class="tile tile-a speaking"><span>PR</span></div>
+              <div class="tile tile-b"><span>MK</span></div>
+              <div class="tile tile-c"><span>JL</span></div>
+              <div class="tile tile-you"><span>You</span></div>
+            </div>
+          </div>
+
+          <div class="pill pill-scene">
+            <img src="assets/icon-white-96.png" alt="">
+            <span class="pill-btn"><i></i><i></i><i></i><i></i><i></i><b class="stop"></b></span>
+          </div>
+
+          <div class="live-doc">
+            <div class="live-doc-bar">2026-11-05_1432.md</div>
+            <p><b class="s1">Speaker 1 (02:13):</b> Can you assign someone to support this?</p>
+            <p><b class="s2">Speaker 2 (02:21):</b> It’ll likely be Vinit, but I’ll check his plate first.</p>
+            <p><b class="you">You (02:26):</b> Sounds good, loop me in on that chat.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WHERE YOUR VOICE GOES -->
+    <section class="section trip-section" id="trip">
+      <div class="wrap">
+        <h2 class="h-section">Where does your voice go?</h2>
+        <p class="section-lede">With most AI notetakers, a recording of you takes a long trip before you get notes back. With Oatmeal it takes a short one.</p>
+
+        <div class="route route-cloud">
+          <p class="route-name">A typical cloud notetaker</p>
+          <ol>
+            <li>Your microphone</li>
+            <li>Their app</li>
+            <li>The internet</li>
+            <li>Their servers</li>
+            <li>Their AI model</li>
+            <li>Your account on their site</li>
+          </ol>
+        </div>
+
+        <div class="route route-oat">
+          <p class="route-name">Oatmeal</p>
+          <ol>
+            <li>Your microphone</li>
+            <li>Your Mac</li>
+            <li class="route-file">2026-11-05_1432.md</li>
+          </ol>
+          <p class="route-end">That’s the whole trip.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="section section-tint" id="how">
+      <div class="wrap">
+        <h2 class="h-section">A call in four moments</h2>
+        <ol class="moments">
+          <li class="moment">
+            <div class="moment-art art-menu" aria-hidden="true">
+              <div class="menu">
+                <div class="menu-item is-hot">Start Recording</div>
+                <div class="menu-item">Start Recording from Calendar…</div>
+                <div class="menu-item is-off">Stop Recording &amp; Transcribe</div>
+                <hr>
+                <div class="menu-item">Check Active Transcriptions…</div>
+                <div class="menu-item">Re-transcribe…</div>
+                <hr>
+                <div class="menu-item">Change Storage Location…</div>
+                <div class="menu-item has-sub">Open Folder</div>
+                <hr>
+                <div class="menu-item has-key" data-key="⌘Q">Quit</div>
+              </div>
+            </div>
+            <h3>Start from the menu bar</h3>
+            <p>Choose <b>Start Recording</b>, or pick the meeting from your calendar to save its title and attendees with the transcript.</p>
+          </li>
+
+          <li class="moment">
+            <div class="moment-art art-pill" aria-hidden="true">
+              <div class="pill">
+                <img src="assets/icon-white-96.png" alt="">
+                <span class="pill-btn"><i></i><i></i><i></i><i></i><i></i><b class="stop"></b></span>
+              </div>
+            </div>
+            <h3>Talk as usual</h3>
+            <p>A small pill floats over every app and Space so you always know you’re recording. It never takes focus from your call. Drag it out of the way.</p>
+          </li>
+
+          <li class="moment">
+            <div class="moment-art art-pill" aria-hidden="true">
+              <div class="pill is-stop">
+                <img src="assets/icon-white-96.png" alt="">
+                <span class="pill-btn"><i></i><i></i><i></i><i></i><i></i><b class="stop"></b></span>
+              </div>
+              <span class="cursor"></span>
+            </div>
+            <h3>Stop when you’re done</h3>
+            <p>Hover the waveform and it turns into a stop button. Or choose <b>Stop Recording &amp; Transcribe</b> from the menu.</p>
+          </li>
+
+          <li class="moment">
+            <div class="moment-art art-note" aria-hidden="true">
+              <div class="notification">
+                <img src="assets/icon-256.png" alt="">
+                <div>
+                  <p class="n-app">Oatmeal <span>now</span></p>
+                  <p class="n-title">Transcript ready</p>
+                  <p class="n-body">2026-11-05_1432 — click to open.</p>
+                </div>
+              </div>
+            </div>
+            <h3>Get a notification</h3>
+            <p>Transcription runs in the background, so you can start your next call right away. Click the notification to open the file.</p>
+          </li>
+        </ol>
+        <p class="try">Try it: hover the waveform in the second picture.</p>
+      </div>
+    </section>
+
+    <!-- WHO SAID WHAT -->
+    <section class="section" id="speakers">
+      <div class="wrap speakers">
+        <div class="speakers-copy">
+          <h2 class="h-section">Two tracks in. One conversation out.</h2>
+          <p>Oatmeal records your microphone and your Mac’s audio as separate tracks. Your mic is always <b class="you">You</b>. The other side is split by voice into <b class="s1">Speaker 1</b>, <b class="s2">Speaker 2</b> and so on, then everything is put back in order.</p>
+          <p class="muted">It tells voices apart but doesn’t know names. If speaker separation can’t run, you still get the whole transcript with the other side labelled Them.</p>
+        </div>
+
+        <div class="speakers-art" role="img" aria-label="Diagram: a microphone track labelled You and a Mac audio track split into Speaker 1 and Speaker 2 combine into one transcript.">
+          <div class="track">
+            <span class="track-label">Your microphone</span>
+            <div class="wave" data-segments="33-43:you"></div>
+          </div>
+          <div class="track">
+            <span class="track-label">Your Mac’s audio</span>
+            <div class="wave" data-segments="1-14:s1,16-31:s2,46-58:s1"></div>
+          </div>
+          <div class="merge-arrow"></div>
+          <figure class="doc">
+            <div class="win-bar"><span class="lights"><i></i><i></i><i></i></span><span>2026-11-05_1432.md</span></div>
+            <div class="doc-body">
+              <p class="doc-meta">Participants: You (mic), Speaker 1, Speaker 2 (system)</p>
+              <p><b class="s1">Speaker 1 (02:13):</b> Can you assign someone to support this?</p>
+              <p><b class="s2">Speaker 2 (02:21):</b> It’ll likely be Vinit, but I’ll check his plate first.</p>
+              <p><b class="you">You (02:26):</b> Sounds good, loop me in on that chat.</p>
+              <p><b class="s1">Speaker 1 (02:31):</b> Will do. Let’s pick it up Thursday.</p>
+            </div>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- LEFT OUT -->
+    <section class="section section-ink" id="left-out">
+      <div class="wrap">
+        <h2 class="h-section">What Oatmeal leaves out</h2>
+        <ul class="nope">
+          <li><s>Send a bot to your meeting</s><span>It listens through your Mac, like you do.</span></li>
+          <li><s>Make you sign up</s><span>There’s no account to create, and no server to log in to.</span></li>
+          <li><s>Upload your audio</s><span>Speech models run on your Mac’s chip, offline.</span></li>
+          <li><s>Write summaries for you</s><span>A summary only sees the meeting. You have the context.</span></li>
+          <li><s>Charge you every month</s><span>It’s free, and the code is on GitHub.</span></li>
+          <li><s>Track your visit here</s><span>This page has no cookies, analytics or third-party requests.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- FILES -->
+    <section class="section" id="files">
+      <div class="wrap files">
+        <div class="finder" role="img" aria-label="A Finder window showing the Meetings folder with transcript files named by date and time.">
+          <div class="win-bar"><span class="lights"><i></i><i></i><i></i></span><span>transcripts</span></div>
+          <div class="finder-body">
+            <ul class="finder-side">
+              <li class="f-head">Meetings</li>
+              <li>recordings</li>
+              <li class="is-sel">transcripts</li>
+            </ul>
+            <ul class="finder-list">
+              <li class="is-sel"><span class="md">2026-11-05_1432.md</span><span>Today, 3:04 PM</span></li>
+              <li><span class="md">2026-11-05_1000.md</span><span>Today, 10:41 AM</span></li>
+              <li><span class="md">2026-11-04_1600.md</span><span>Yesterday, 4:52 PM</span></li>
+              <li><span class="md">2026-11-03_0930.md</span><span>Mon, 10:15 AM</span></li>
+              <li><span class="md">2026-10-30_1130.md</span><span>Oct 30, 12:02 PM</span></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="files-copy">
+          <h2 class="h-section">Just files. In a folder. On your Mac.</h2>
+          <p>Every call becomes a Markdown file named by date and time, in <code>~/Meetings</code> or any folder you choose. No app to export from and nothing to sync.</p>
+          <p>Search them in Spotlight, keep them in Obsidian, or hand one to your own AI assistant, which already knows your projects better than any meeting bot.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- INSTALL -->
+    <section class="section section-tint" id="install">
+      <div class="wrap narrow">
+        <h2 class="h-section">Set up in about five minutes</h2>
+        <ol class="steps">
+          <li>
+            <h3>Install the app</h3>
+            <p>Download the latest disk image, open it, and drag <b>Oatmeal</b> into Applications.</p>
+          </li>
+          <li>
+            <h3>Download the speech models, once</h3>
+            <p>Open Terminal and paste this. It fetches about 3.4 GB of models to your Mac. After that, Oatmeal never needs the internet.</p>
+            <div class="terminal">
+              <div class="win-bar"><span class="lights"><i></i><i></i><i></i></span><span>Terminal</span></div>
+              <div class="terminal-body">
+                <code id="fetch-cmd">/Applications/Oatmeal.app/Contents/Resources/mr-cli/mr-cli doctor --fetch-model</code>
+                <button type="button" class="copy" data-copy="fetch-cmd">Copy</button>
+              </div>
+            </div>
+          </li>
+          <li>
+            <h3>Allow two permissions</h3>
+            <p>Oatmeal lives in the menu bar, with no Dock icon. The first time you record, allow <b>Microphone</b> to hear you and <b>System Audio Recording</b> to hear the other side.</p>
+          </li>
+        </ol>
+        <p class="muted">More detail is in the <a href="https://github.com/avsabhinav/meeting_recorder/blob/main/docs/installing.md">full install guide</a>.</p>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="wrap narrow">
+        <h2 class="h-section">Questions</h2>
+        <details>
+          <summary>Is it really free?</summary>
+          <p>Yes. There’s no paid tier, no trial and no account. Oatmeal is open source, and you can build it yourself from the GitHub repository.</p>
+        </details>
+        <details>
+          <summary>Does it work with Zoom, Google Meet and Teams?</summary>
+          <p>Yes, and with anything else that plays audio on your Mac. Oatmeal records your microphone and your Mac’s audio output, so it doesn’t need an integration with any meeting app.</p>
+        </details>
+        <details>
+          <summary>Why Apple Silicon only?</summary>
+          <p>Transcription and speaker separation run on Apple’s MLX framework, which needs an M1 chip or newer. That’s what makes local transcription fast enough to be practical.</p>
+        </details>
+        <details>
+          <summary>Which speech models does it use?</summary>
+          <p>Whisper large-v3-turbo for transcription and NVIDIA Nemotron for telling speakers apart, both running locally on your Mac.</p>
+        </details>
+        <details>
+          <summary>Where are my files?</summary>
+          <p>Transcripts go to <code>~/Meetings/transcripts/</code> and audio to <code>~/Meetings/recordings/</code>. Use <b>Change Storage Location…</b> in the menu to keep them anywhere else.</p>
+        </details>
+        <details>
+          <summary>Do I need permission to record a call?</summary>
+          <p>Often, yes. Many places require consent from some or all participants before a conversation is recorded. You’re responsible for following the law where you are and for telling people you’re recording. See the <a href="https://github.com/avsabhinav/meeting_recorder#recording-consent--legal-disclaimer">recording consent notice</a>.</p>
+        </details>
+      </div>
+    </section>
+
+    <!-- CLOSING -->
+    <section class="closing">
+      <div class="wrap closing-inner">
+        <div class="pill pill-big" aria-hidden="true">
+          <img src="assets/icon-white-96.png" alt="">
+          <span class="pill-btn"><i></i><i></i><i></i><i></i><i></i><b class="stop"></b></span>
+        </div>
+        <div>
+          <h2>Your calls, on your Mac, and nowhere else.</h2>
+          <a class="btn btn-light" href="https://github.com/avsabhinav/meeting_recorder/releases/latest">Download for Mac</a>
+          <p class="cta-note">Free and open source. Apple Silicon, macOS 14.2 or later.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <img src="assets/icon-256.png" alt="" width="28" height="28">
+        <span>Oatmeal</span>
+      </div>
+      <nav aria-label="Project links">
+        <a href="https://github.com/avsabhinav/meeting_recorder">GitHub</a>
+        <a href="https://github.com/avsabhinav/meeting_recorder/releases">Releases</a>
+        <a href="https://github.com/avsabhinav/meeting_recorder/blob/main/docs/installing.md">Docs</a>
+        <a href="https://github.com/avsabhinav/meeting_recorder/blob/main/LICENSE">License</a>
+        <a href="https://github.com/avsabhinav/meeting_recorder/blob/main/SECURITY.md">Security</a>
+      </nav>
+      <p class="legal">Recording laws vary. You’re responsible for getting consent from everyone on a call before recording it. This page uses no cookies, trackers or third-party requests.</p>
+    </div>
+  </footer>
+
+  <script>
+    // Copy buttons
+    document.querySelectorAll('[data-copy]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var text = document.getElementById(btn.dataset.copy).textContent;
+        navigator.clipboard.writeText(text).then(function () {
+          btn.textContent = 'Copied';
+          setTimeout(function () { btn.textContent = 'Copy'; }, 1800);
+        });
+      });
+    });
+
+    // Waveform tracks: 60 bars each, deterministic heights; speech segments are
+    // tall and coloured by speaker, silence is a low flat line.
+    document.querySelectorAll('.wave').forEach(function (wave, w) {
+      var segs = wave.dataset.segments.split(',').map(function (s) {
+        var p = s.split(':'), r = p[0].split('-');
+        return { from: +r[0], to: +r[1], cls: p[1] };
+      });
+      var seed = 7 + w * 13;
+      function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+      for (var i = 0; i < 60; i++) {
+        var bar = document.createElement('i');
+        var seg = segs.find(function (s) { return i >= s.from && i <= s.to; });
+        var h = seg ? 30 + rnd() * 70 : 6 + rnd() * 6;
+        bar.style.height = h.toFixed(0) + '%';
+        if (seg) bar.className = seg.cls;
+        wave.appendChild(bar);
+      }
+    });
+  </script>
+</body>
+</html>
